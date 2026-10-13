@@ -1118,8 +1118,7 @@ function pageExportHTML(p) {
 }
 async function exportPdf(name, inner) {
   const css = `body{font:15px/1.6 "Segoe UI",system-ui,sans-serif;color:#1d1d1d;margin:0}.pg{page-break-after:always}.pg:last-child{page-break-after:auto}h1{font-size:26px;margin:0 0 4px}.meta{color:#777;font-size:12px;margin-bottom:14px}.content{position:relative;padding:0 2px}.content img{max-width:100%}.content img.inkimg{position:absolute;left:0;top:0;max-width:none}.sec{font-size:30px;border-bottom:2px solid #ccc;padding-bottom:6px;margin-bottom:18px}pre{background:#f3f3f3;padding:8px;border-radius:6px;white-space:pre-wrap}blockquote{border-left:3px solid #aaa;margin:0;padding-left:10px;color:#555}.ntag{display:inline-flex;vertical-align:-2px;margin-right:4px;color:#666}.ntag svg{width:14px;height:14px}.math[data-display="1"]{display:block;text-align:center;margin:8px 0}`;
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title><link rel="stylesheet" href="${new URL('./lib/katex/dist/katex.min.css', location.href).href}"><style>${css}</style></head><body>${inner}<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(e => console.warn('offline cache unavailable', e)));</script>
-</body></html>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title><link rel="stylesheet" href="${new URL('./lib/katex/dist/katex.min.css', location.href).href}"><style>${css}</style></head><body>${inner}</body></html>`;
   if (window.native?.exportPdf) { toast('Making PDF…'); if (await window.native.exportPdf(name, html)) toast('PDF saved'); return; }
   const fr = Object.assign(document.createElement('iframe'), { srcdoc: html }); fr.style.cssText = 'position:fixed;width:0;height:0;border:0';
   fr.onload = () => { fr.contentWindow.print(); setTimeout(() => fr.remove(), 60000); }; document.body.append(fr); // iPad: Print → Save to Files as PDF
@@ -1129,11 +1128,19 @@ function exportNotebook(nb) {
   exportPdf(nb.name, sectionsOf(nb.id).filter(s => !isSealed(s)).map(s => { const ps = pagesOf(s.id); return ps.length ? `<h1 class="sec">${esc(s.name)}</h1>${ps.map(pageExportHTML).join('')}` : ''; }).join('') || '<p>Nothing to export.</p>');
 }
 // AI spelling & grammar fix for a piece of text (needs the DeepSeek key)
-async function aiFix(text) {
-  if (!window.native?.ai || !S.settings.aiKey) { toast('Add a DeepSeek key in Settings to fix grammar with AI'); return null; }
-  toast('Fixing spelling & grammar…');
-  try { return (await window.native.ai({ key: S.settings.aiKey, model: S.settings.aiModel, messages: [{ role: 'system', content: 'Correct the spelling, grammar and punctuation of the user\'s text. Keep its meaning, language, tone and line breaks. Reply with only the corrected text.' }, { role: 'user', content: text }] })).trim(); }
-  catch (e) { toast('AI fix failed: ' + errText(e)); return null; }
+// spelling & grammar, no AI key: LanguageTool's free service (the text you fix is sent to languagetool.org, no account),
+// or, offline / if that fails, this computer's spell-check dictionary (spelling only). Returns [{ at, len, rep }]
+async function grammarFixes(text) {
+  try {
+    const r = await fetch('https://api.languagetool.org/v2/check', { method: 'POST', signal: AbortSignal.timeout(10000), body: new URLSearchParams({ text, language: 'auto', preferredVariants: 'en-GB' }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return (await r.json()).matches.filter(m => m.replacements.length && !['style', 'typographical'].includes(m.rule?.issueType)).map(m => ({ at: m.offset, len: m.length, rep: m.replacements[0].value }));
+  } catch (e) {
+    if (!window.native?.spellSuggest) { toast('Spelling & grammar needs an internet connection'); return null; }
+    const words = [...text.matchAll(/\p{L}+(?:'\p{L}+)*/gu)], sug = window.native.spellSuggest(words.map(w => w[0]));
+    toast('Offline: fixed spelling only');
+    return words.flatMap((w, k) => sug[k] ? [{ at: w.index, len: w[0].length, rep: sug[k] }] : []);
+  }
 }
 // right-click in a page: format bar + spelling. Electron sends the spellchecker's suggestions with each right-click
 let pageCtx = null; // set by the open page editor: (x, y, spell) => shows its menu
@@ -1654,10 +1661,21 @@ function openEditor(el, note, refresh, base) {
         ['H1', run(() => fmt('formatBlock', 'h1')), 'Heading 1'], ['H2', run(() => fmt('formatBlock', 'h2')), 'Heading 2'], ['¶', run(() => fmt('formatBlock', 'p')), 'Normal text'], ['|'],
         [icon('ul', 16), run(() => fmt('insertUnorderedList')), 'Bulleted list'], [icon('check', 16), run(() => applyTag('todo')), 'To-do'], [icon('link', 15), () => { restore(range); tb.querySelector('[data-c=link]').click(); }, 'Link'], ['<span class="tx">x²</span>', () => insertMath(false, range), 'Equation']]],
       '-', ...sp,
-      [`${icon('check', 15)} Fix spelling & grammar (AI)`, async () => {
+      [`${icon('check', 15)} Fix spelling & grammar`, async () => {
         restore(range); let r = curRange(); if (!r || r.collapsed) { const blk = blockOf(); if (!blk) return; r = document.createRange(); r.selectNodeContents(blk); }
-        const fixed = await aiFix(r.toString()); if (fixed == null) return;
-        const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('insertText', false, fixed); touch();
+        // map text offsets to text nodes, then replace only the wrong words (last first) so formatting and undo survive
+        const nodes = [], w = document.createTreeWalker(r.commonAncestorContainer, NodeFilter.SHOW_TEXT); let text = '';
+        for (let n = w.currentNode.nodeType === 3 ? w.currentNode : w.nextNode(); n; n = w.nextNode()) {
+          if (!r.intersectsNode(n)) continue;
+          const a = n === r.startContainer ? r.startOffset : 0, b = n === r.endContainer ? r.endOffset : n.length;
+          nodes.push({ n, a, at: text.length }); text += n.data.slice(a, b);
+        }
+        const fixes = text.trim() && await grammarFixes(text); if (!fixes) return;
+        if (!fixes.length) return toast('No mistakes found');
+        const pos = o => { const k = nodes.findLast(x => x.at <= o); return [k.n, k.a + o - k.at]; };
+        const s = getSelection();
+        for (const f of fixes.sort((x, y) => y.at - x.at)) { const q = document.createRange(); q.setStart(...pos(f.at)); q.setEnd(...pos(f.at + f.len)); s.removeAllRanges(); s.addRange(q); document.execCommand('insertText', false, f.rep); }
+        touch(); toast(`Fixed ${fixes.length} ${fixes.length === 1 ? 'mistake' : 'mistakes'}`);
       }],
       [`${icon('image', 15)} Insert picture`, () => { picRange = range; $('#picIn', el).click(); }], '-',
       ['Cut', run(() => document.execCommand('cut'))], ['Copy', run(() => document.execCommand('copy'))], ['Paste', () => { restore(range); window.native?.paste ? window.native.paste() : toast('Use Ctrl+V to paste'); }]
@@ -3729,5 +3747,6 @@ if (NATIVE) window.native.onUpdate(u => {
 });
 load().then(() => { route(); if (IS_WIDGET) bc?.postMessage({ type: 'hello' }); else syncCals(); }).catch(err => { main.innerHTML = `<div class="page"><h1>Could not open storage</h1><p>${esc(err.message)}</p></div>`; });
 </script>
+<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(e => console.warn('offline cache unavailable', e)));</script>
 </body>
 </html>
