@@ -334,6 +334,32 @@ input[type=checkbox]:focus-visible{box-shadow:0 0 0 2px #ffffff33}
 .body:not(.pc-dark) input[type=checkbox]:checked::after{border-color:#fff}
 .ctx{position:fixed;z-index:20;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px;min-width:210px;box-shadow:0 10px 30px #000a}
 .ctx button{display:flex;width:100%;background:none;border:none;justify-content:flex-start;padding:6px 10px;border-radius:6px}
+/* v1.4: right-click format bar, highlighter, pictures, LaTeX dictionary, mini window */
+.ctxbar{display:flex;align-items:center;gap:1px;padding:3px;flex-wrap:nowrap}
+.ctx .ctxbar button{width:30px;height:30px;padding:0;justify-content:center;flex:none;color:#ddd}
+.ctx .ctxbar .vs{width:1px;height:18px;background:var(--line);margin:0 4px;flex:none}
+.hlsw{display:inline-block;width:16px;height:16px;border-radius:4px;border:1px solid #0003;flex:none}
+.body img{max-width:100%;cursor:pointer;border-radius:8px}
+.body img.nimg{display:block;margin:10px 0}
+.body img.sel{outline:2px solid #9a9a9a;outline-offset:3px}
+.imgbar{position:absolute;z-index:6;display:flex;gap:2px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px;box-shadow:0 6px 18px #0008}
+.imgbar[hidden]{display:none}
+.imgbar button{padding:3px 9px;font-size:12px;background:none;border-color:transparent}
+.imgbar button.on{background:#3a3a3a;border-color:#888}
+.imgbar .vs{width:1px;height:18px;background:var(--line);margin:0 3px}
+dialog.wide{width:fit-content;max-width:96vw}
+.anno .sw{width:20px;height:20px;padding:0;border-radius:50%;border:2px solid #555}.anno .sw.on{outline:2px solid #fff;outline-offset:1px}
+.astage{position:relative;margin:0 auto;border-radius:6px;overflow:hidden;touch-action:none;cursor:crosshair}
+.astage img{display:block;user-select:none;pointer-events:none}
+.texdict{display:grid;gap:6px}
+.tdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:4px;max-height:190px;overflow:auto;padding:2px}
+.tdgrid button{height:44px;padding:2px;justify-content:center;overflow:hidden;font-size:13px;background:var(--panel2)}
+.tdgrid button:hover{border-color:#777}
+.frm.fimg{gap:8px;justify-content:flex-start}.frm.fimg img{width:56px;height:40px;object-fit:cover;border-radius:5px}.frm.fimg span{flex:1;font-size:13px}
+body.widget #side,body.widget #aiBtn,body.widget #kbdTab,body.widget #calcBtn{display:none!important}
+body.widget main{margin:0;border-radius:0;border:none}
+.wgt{padding:14px 16px 20px;display:grid;gap:8px}.wgt h3{margin:10px 0 0;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+.wscratch{width:100%;height:150px;resize:vertical;background:#3a3618;border-color:#4a4520;border-radius:10px;padding:10px}
 .ctx button:hover{background:var(--panel2)}
 .ctx hr{border:none;border-top:1px solid var(--line);margin:4px 0}
 .ctx .pal{display:flex;gap:7px;padding:6px 10px}
@@ -612,7 +638,7 @@ const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes(
 const today = () => ymd(new Date());
 const firstOf = d => new Date(d.getFullYear(), d.getMonth(), 1);
 const plain = h => (h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
-const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : new Date(t).toLocaleDateString(); };
+const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : new Date(t).toLocaleDateString(LOC); };
 const kb = n => n < 1048576 ? `${Math.max(1, n / 1024 | 0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 const dl = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
 // desktop app (Electron preload) vs web / iPad build: handwriting recognition, calendar fetching, AI, PowerPoint and updates need the desktop app
@@ -710,12 +736,12 @@ function migrateSections() {
 }
 let saveT;
 // ponytail: rewrites the whole state on each save; split per-record if boards get huge
-const save = () => { clearTimeout(saveT); saveT = setTimeout(flush, 300); };
-const flush = async () => { const out = await sealState(); db.transaction('kv', 'readwrite').objectStore('kv').put(out, 'state'); };
+const save = () => { clearTimeout(saveT); saveT = setTimeout(flush, IS_WIDGET ? 0 : 300); }; // the mini window sends edits at once so a stale copy never lands after the main window changed
+const flush = async () => { if (IS_WIDGET) return bc?.postMessage({ type: 'patch', tasks: S.tasks, events: S.events, scratch: S.scratch }); const out = await sealState(); db.transaction('kv', 'readwrite').objectStore('kv').put(out, 'state'); bcState(); };
 addEventListener('pagehide', flush);
 document.addEventListener('visibilitychange', () => document.hidden && db && flush()); // iPadOS can kill a backgrounded web app without pagehide
 // called by the main process before the window closes, so the last edit is on disk
-window.flushNow = async () => { clearTimeout(saveT); if (!db) return; const out = await sealState(); await new Promise(res => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(out, 'state'); t.oncomplete = t.onerror = () => res(); }); };
+window.flushNow = async () => { clearTimeout(saveT); if (!db) return; if (IS_WIDGET) return flush(); const out = await sealState(); await new Promise(res => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(out, 'state'); t.oncomplete = t.onerror = () => res(); }); bcState(); };
 
 function seed() {
   const nb = { id: uid(), name: 'My Notebook', parentId: null }, sec = { id: uid(), notebookId: nb.id, name: 'Quick Notes', color: '#9aa5b1', order: 0 };
@@ -769,6 +795,7 @@ function ask(label, value = '', tex = false) {
     const f = d.firstChild, prev = f.querySelector('.prev');
     const draw = () => prev && window.katex && katex.render(texWithAns(f.v.value) || ' ', prev, { throwOnError: false, displayMode: true });
     f.v.oninput = draw; draw();
+    if (tex) prev.after(texPalette(f.v, draw)); // searchable symbol dictionary
     if (tex) f.v.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fin(f.v.value); } };
     f.onsubmit = e => { e.preventDefault(); fin(f.v.value); };
     f.querySelector('.cancel').onclick = () => fin(null);
@@ -842,7 +869,7 @@ function inkGroup(bar) { // one toolbar + undo stack shared by every surface in 
     if (b.dataset.ink === 'shapes') toggleShapes();
     if (b.dataset.ink === 'scratch') inkState.scratch = !inkState.scratch;
     if (b.dataset.ink === 'totext') (g.onText || (async () => { const t = await recognizeInk(g.surfaces.flatMap(x => x.list())); if (t != null) inkTextDialog(t, 'copy', v => { navigator.clipboard.writeText(v); toast('Text copied'); }); }))();
-    if (b.dataset.ink === 'undo') { const op = g.undo.pop(); op?.s.apply(op.add, op.del); }
+    if (b.dataset.ink === 'undo') inkUndo(g);
     if (b.dataset.ink === 'clear' && g.surfaces.some(s => s.list().length) && confirm('Clear all ink here?'))
       g.surfaces.forEach(s => { const all = [...s.list()]; if (all.length) { s.apply(all, []); g.undo.push({ s, add: [], del: all }); } });
     g.sync();
@@ -912,6 +939,7 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
   host.addEventListener('pointermove', move, true);
   const up = e => {
     if (!cur || e.pointerId !== cur.id) return;
+    if (g.bar) { lastInkG = g; lastInkAt = Date.now(); } g.redo = [];
     if (cur.erase) { if (cur.removed.length) { g.undo.push({ s, add: [], del: cur.removed }); save(); } }
     else if (cur.s.pts.length) {
       const L = list(), r = smartInk(cur.s, L, 48 / unit());
@@ -1000,6 +1028,157 @@ function removeProtection(s) {
 }
 setInterval(() => { if (secKeys.size && Date.now() - lastInput > 10 * 60e3) S.sections.filter(s => secKeys.has(s.id)).forEach(lockSection); }, 30e3);
 
+/* ---------- v1.4 (tester feedback): LaTeX dictionary, highlighter, pictures, right-click bar, ink undo, PDF export, zoom, mini window ---------- */
+const LOC = 'en-GB'; // dates read dd/mm/yyyy
+// searchable LaTeX symbols for the equation box: [tex, name/keywords]
+const TEX_DICT = [
+  ['\\frac{a}{b}', 'fraction divide over'], ['\\sqrt{x}', 'square root'], ['\\sqrt[n]{x}', 'nth root cube'], ['x^{2}', 'power exponent squared superscript'], ['x_{i}', 'subscript index'], ['\\pm', 'plus minus'], ['\\times', 'times multiply cross'], ['\\div', 'divide'], ['\\cdot', 'dot multiply'],
+  ['\\neq', 'not equal'], ['\\approx', 'approximately'], ['\\leq', 'less or equal'], ['\\geq', 'greater or equal'], ['\\ll', 'much less'], ['\\gg', 'much greater'], ['\\equiv', 'equivalent identical'], ['\\propto', 'proportional'], ['\\infty', 'infinity'], ['^{\\circ}', 'degree'], ['\\%', 'percent'],
+  ['\\left| x \\right|', 'absolute value modulus'], ['\\left( x \\right)', 'brackets parentheses'], ['\\left[ x \\right]', 'square brackets'], ['\\lfloor x \\rfloor', 'floor'], ['\\lceil x \\rceil', 'ceiling'],
+  ['\\alpha', 'alpha greek'], ['\\beta', 'beta'], ['\\gamma', 'gamma'], ['\\delta', 'delta'], ['\\epsilon', 'epsilon'], ['\\varepsilon', 'epsilon variant'], ['\\theta', 'theta angle'], ['\\lambda', 'lambda wavelength'], ['\\mu', 'mu micro'], ['\\pi', 'pi'], ['\\rho', 'rho density'], ['\\sigma', 'sigma'], ['\\tau', 'tau torque'], ['\\phi', 'phi'], ['\\omega', 'omega angular'], ['\\eta', 'eta efficiency'], ['\\kappa', 'kappa'], ['\\nu', 'nu frequency'], ['\\xi', 'xi'], ['\\chi', 'chi'], ['\\psi', 'psi wave'],
+  ['\\Delta', 'Delta change'], ['\\Sigma', 'Sigma'], ['\\Omega', 'Omega ohm'], ['\\Gamma', 'Gamma'], ['\\Theta', 'Theta'], ['\\Lambda', 'Lambda'], ['\\Pi', 'Pi product'], ['\\Phi', 'Phi flux'], ['\\Psi', 'Psi'],
+  ['\\int_{a}^{b} f(x)\\,dx', 'integral definite'], ['\\int f(x)\\,dx', 'integral indefinite'], ['\\iint', 'double integral'], ['\\oint', 'contour line integral'], ['\\frac{d}{dx}', 'derivative'], ['\\frac{dy}{dx}', 'derivative dy dx'], ['\\frac{\\partial f}{\\partial x}', 'partial derivative'], ['\\lim_{x \\to 0}', 'limit'], ['\\sum_{i=1}^{n}', 'sum sigma series'], ['\\prod_{i=1}^{n}', 'product'], ['\\nabla', 'nabla gradient del'], ['\\dot{x}', 'dot derivative time'], ['\\ddot{x}', 'double dot acceleration'], ["f'(x)", 'prime derivative'],
+  ['\\vec{v}', 'vector arrow'], ['\\hat{x}', 'hat unit vector'], ['\\bar{x}', 'bar mean average'], ['\\overline{AB}', 'overline segment'], ['\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}', 'matrix 2x2'], ['\\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix}', 'determinant'], ['\\begin{cases} x & x \\ge 0 \\\\ -x & x < 0 \\end{cases}', 'cases piecewise'], ['\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}', 'aligned equations'],
+  ['\\in', 'element of in'], ['\\notin', 'not in'], ['\\subset', 'subset'], ['\\subseteq', 'subset equal'], ['\\cup', 'union'], ['\\cap', 'intersection'], ['\\emptyset', 'empty set'], ['\\forall', 'for all'], ['\\exists', 'exists'], ['\\neg', 'not negation'], ['\\land', 'and logic'], ['\\lor', 'or logic'],
+  ['\\mathbb{R}', 'real numbers'], ['\\mathbb{N}', 'natural numbers'], ['\\mathbb{Z}', 'integers'], ['\\mathbb{Q}', 'rationals'], ['\\mathbb{C}', 'complex numbers'],
+  ['\\to', 'arrow right tends'], ['\\Rightarrow', 'implies'], ['\\Leftrightarrow', 'if and only if iff'], ['\\leftarrow', 'arrow left'], ['\\rightleftharpoons', 'equilibrium chemistry reversible'], ['\\uparrow', 'up arrow'], ['\\downarrow', 'down arrow'], ['\\mapsto', 'maps to'],
+  ['\\sin', 'sine trig'], ['\\cos', 'cosine'], ['\\tan', 'tangent'], ['\\sin^{-1}', 'arcsin inverse'], ['\\log', 'log logarithm'], ['\\ln', 'natural log'], ['\\log_{b}', 'log base'], ['e^{x}', 'exponential'],
+  ['\\mathrm{H_2O}', 'chemistry formula water'], ['\\hbar', 'h bar planck'], ['\\angle', 'angle'], ['\\perp', 'perpendicular'], ['\\parallel', 'parallel'], ['\\triangle', 'triangle'], ['\\therefore', 'therefore'], ['\\because', 'because'], ['\\text{text}', 'words text'], ['\\quad', 'space gap'], ['\\cancel{x}', 'cancel cross out']
+];
+function texPalette(ta, draw) { // search box + clickable symbols under the equation box
+  const box = document.createElement('div'); box.className = 'texdict';
+  box.innerHTML = `<input class="tdq" placeholder="Search symbols — fraction, integral, alpha, matrix…"><div class="tdgrid"></div>`;
+  const grid = box.querySelector('.tdgrid'), q = box.querySelector('.tdq');
+  const show = () => {
+    const s = q.value.trim().toLowerCase(), hits = TEX_DICT.filter(([t, n]) => !s || n.includes(s) || t.toLowerCase().includes(s)).slice(0, s ? 60 : 36);
+    grid.innerHTML = hits.map(([t, n]) => `<button type="button" data-t="${esc(t)}" title="${esc(n.split(' ')[0])}: ${esc(t)}">${window.katex ? katex.renderToString(t.replace(/\{([a-z])\}/g, '{$1}'), { throwOnError: false }) : esc(t)}</button>`).join('') || '<small class="mut">No match</small>';
+  };
+  q.oninput = show; q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); grid.querySelector('button')?.click(); } };
+  grid.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const t = b.dataset.t, s = ta.selectionStart, end = ta.selectionEnd;
+    ta.setRangeText(t, s, end, 'end');
+    const brace = t.indexOf('{'); if (brace >= 0) ta.setSelectionRange(s + brace + 1, s + t.indexOf('}', brace)); // select the first placeholder
+    ta.focus(); draw();
+  };
+  show(); return box;
+}
+// highlighter colours (translucent so text stays readable on light and dark pages)
+const HL_COLORS = [['Yellow', '#facc1580'], ['Green', '#4ade8070'], ['Pink', '#f472b670'], ['Blue', '#60a5fa70'], ['Orange', '#fb923c70']];
+// draw on a picture: returns a new image (data URL) or null
+function annotateImage(src) {
+  return new Promise(async res => {
+    const im = await loadImg(src); if (!im) return res(null);
+    const d = $('#dlg'), sc = Math.min(1, 860 / im.naturalWidth, (innerHeight * .68) / im.naturalHeight), W = Math.round(im.naturalWidth * sc), H = Math.round(im.naturalHeight * sc);
+    const penOpt = { c: '#e53935', w: 3 }, g = { undo: [], redo: [], surfaces: [], sync() { } }, strokes = [];
+    d.onclose = null; d.classList.add('wide');
+    d.innerHTML = `<form class="anno"><div class="row"><b style="flex:1">Draw on picture</b>${['#e53935', '#111111', '#1e5bd8', '#2e7d32', '#fbc02d', '#ffffff'].map(c => `<button type="button" class="sw${c === penOpt.c ? ' on' : ''}" data-c="${c}" style="background:${c}"></button>`).join('')}<input type="range" min="1" max="14" value="3" class="asz" title="Pen size"><button type="button" data-a="undo" title="Undo">${icon('undo', 16)}</button><button type="button" data-a="clear">Clear</button></div>
+      <div class="astage" style="width:${W}px;height:${H}px"><img src="${src}" style="width:${W}px;height:${H}px"><canvas class="ink"></canvas></div>
+      <div class="row"><small class="mut" style="flex:1">Draw with the pen or mouse.</small><button type="button" class="cancel">Cancel</button><button class="pri">Save picture</button></div></form>`;
+    const f = d.firstChild, stage = f.querySelector('.astage');
+    const ink = attachInk(g, { host: stage, canvas: stage.querySelector('canvas'), list: () => strokes, save: () => { }, always: true, pen: penOpt, size: () => [W, H] });
+    const fin = v => { d.classList.remove('wide'); d.close(); res(v); };
+    f.onclick = e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.c) { penOpt.c = b.dataset.c; f.querySelectorAll('[data-c]').forEach(x => x.classList.toggle('on', x === b)); }
+      if (b.dataset.a === 'undo') { const op = g.undo.pop(); op?.s.apply(op.add, op.del); }
+      if (b.dataset.a === 'clear' && strokes.length) ink.apply([...strokes], []);
+    };
+    f.querySelector('.asz').oninput = e => penOpt.w = +e.target.value;
+    f.querySelector('.cancel').onclick = () => fin(null);
+    d.onclose = () => fin(null);
+    f.onsubmit = e => {
+      e.preventDefault(); if (!strokes.length) return fin(null);
+      const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      const x = c.getContext('2d'); x.drawImage(im, 0, 0); x.scale(1 / sc, 1 / sc); strokes.forEach(s => drawStroke(x, s));
+      fin(c.toDataURL(/^data:image\/png/.test(src) ? 'image/png' : 'image/jpeg', .9));
+    };
+    d.showModal();
+  });
+}
+// ink undo/redo with Ctrl+Z / Ctrl+Y: applies to the last surface you drew on, unless you typed since
+let lastInkG = null, lastInkAt = 0, lastTypeAt = 0;
+addEventListener('input', () => lastTypeAt = Date.now(), true);
+const inkUndo = g => { const op = g.undo.pop(); if (!op) return toast('Nothing to undo'); op.s.apply(op.add, op.del); (g.redo ||= []).push(op); };
+const inkRedo = g => { const op = g.redo?.pop(); if (!op) return; op.s.apply(op.del, op.add); g.undo.push(op); };
+// printable HTML for a page: rendered math, tags, pictures, ink drawn on top
+function pageExportHTML(p) {
+  const d = document.createElement('div'); d.innerHTML = p.html || '';
+  d.querySelectorAll('.math').forEach(m => { if (window.katex) katex.render(m.dataset.tex, m, { throwOnError: false, displayMode: m.dataset.display === '1' }); });
+  d.querySelectorAll('.ntag').forEach(t => { if (NTAGS[t.dataset.tag]) t.innerHTML = icon(NTAGS[t.dataset.tag].ic, 14); });
+  d.querySelectorAll('input[type=checkbox]').forEach(c => c.replaceWith(document.createTextNode(c.hasAttribute('checked') ? '☑ ' : '☐ ')));
+  let ink = '';
+  if (p.ink?.length) {
+    const bb = boundsOf(p.ink.map(s => ({ k: 'ink', ...s }))), c = document.createElement('canvas'), k = 2;
+    c.width = Math.ceil((bb.x + bb.w + 20) * k); c.height = Math.ceil((bb.y + bb.h + 20) * k);
+    const x = c.getContext('2d'); x.scale(k, k); p.ink.forEach(s => drawStroke(x, { ...s, c: /^#(e8e8e8|ececec|ffffff)$/i.test(s.c) ? '#222222' : s.c }));
+    ink = `<img class="inkimg" src="${c.toDataURL()}" style="width:${c.width / k}px">`;
+  }
+  return `<section class="pg"><h1>${esc(p.title || 'Untitled page')}</h1><div class="meta">${new Date(p.created).toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="content">${d.innerHTML}${ink}</div></section>`;
+}
+async function exportPdf(name, inner) {
+  const css = `body{font:15px/1.6 "Segoe UI",system-ui,sans-serif;color:#1d1d1d;margin:0}.pg{page-break-after:always}.pg:last-child{page-break-after:auto}h1{font-size:26px;margin:0 0 4px}.meta{color:#777;font-size:12px;margin-bottom:14px}.content{position:relative;padding:0 2px}.content img{max-width:100%}.content img.inkimg{position:absolute;left:0;top:0;max-width:none}.sec{font-size:30px;border-bottom:2px solid #ccc;padding-bottom:6px;margin-bottom:18px}pre{background:#f3f3f3;padding:8px;border-radius:6px;white-space:pre-wrap}blockquote{border-left:3px solid #aaa;margin:0;padding-left:10px;color:#555}.ntag{display:inline-flex;vertical-align:-2px;margin-right:4px;color:#666}.ntag svg{width:14px;height:14px}.math[data-display="1"]{display:block;text-align:center;margin:8px 0}`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title><link rel="stylesheet" href="${new URL('./lib/katex/dist/katex.min.css', location.href).href}"><style>${css}</style></head><body>${inner}<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(e => console.warn('offline cache unavailable', e)));</script>
+</body></html>`;
+  if (window.native?.exportPdf) { toast('Making PDF…'); if (await window.native.exportPdf(name, html)) toast('PDF saved'); return; }
+  const fr = Object.assign(document.createElement('iframe'), { srcdoc: html }); fr.style.cssText = 'position:fixed;width:0;height:0;border:0';
+  fr.onload = () => { fr.contentWindow.print(); setTimeout(() => fr.remove(), 60000); }; document.body.append(fr); // iPad: Print → Save to Files as PDF
+}
+const exportPages = (name, pages) => exportPdf(name, pages.filter(p => !noteSealed(p)).map(pageExportHTML).join('') || '<p>Nothing to export.</p>');
+function exportNotebook(nb) {
+  exportPdf(nb.name, sectionsOf(nb.id).filter(s => !isSealed(s)).map(s => { const ps = pagesOf(s.id); return ps.length ? `<h1 class="sec">${esc(s.name)}</h1>${ps.map(pageExportHTML).join('')}` : ''; }).join('') || '<p>Nothing to export.</p>');
+}
+// AI spelling & grammar fix for a piece of text (needs the DeepSeek key)
+async function aiFix(text) {
+  if (!window.native?.ai || !S.settings.aiKey) { toast('Add a DeepSeek key in Settings to fix grammar with AI'); return null; }
+  toast('Fixing spelling & grammar…');
+  try { return (await window.native.ai({ key: S.settings.aiKey, model: S.settings.aiModel, messages: [{ role: 'system', content: 'Correct the spelling, grammar and punctuation of the user\'s text. Keep its meaning, language, tone and line breaks. Reply with only the corrected text.' }, { role: 'user', content: text }] })).trim(); }
+  catch (e) { toast('AI fix failed: ' + errText(e)); return null; }
+}
+// right-click in a page: format bar + spelling. Electron sends the spellchecker's suggestions with each right-click
+let pageCtx = null; // set by the open page editor: (x, y, spell) => shows its menu
+window.native?.onCtx?.(p => {
+  const z = window.zoomFactor || 1, x = p.x / z, y = p.y / z, el = document.elementFromPoint(x, y);
+  if (pageCtx && el?.closest('#body')) return pageCtx(x, y, p);
+  if (!p.editable) return;
+  const items = [...(p.word ? [...(p.suggestions || []).slice(0, 5).map(s => [`<b>${esc(s)}</b>`, () => window.native.spellFix(s)]), [`Add “${esc(p.word)}” to dictionary`, () => window.native.spellAdd(p.word)], '-'] : []),
+    ['Cut', () => document.execCommand('cut')], ['Copy', () => document.execCommand('copy')], ['Paste', () => window.native.paste()]];
+  ctxMenu({ preventDefault() { }, clientX: x, clientY: y }, items);
+});
+// zoom the whole app (Electron); the PDF and whiteboard views have their own zoom
+async function appZoom(step) { if (!window.native?.zoom) return; window.zoomFactor = await window.native.zoom(step); toast(`Zoom ${Math.round(window.zoomFactor * 100)}%`); }
+addEventListener('wheel', e => { if (e.ctrlKey && !e.defaultPrevented && window.native?.zoom) { e.preventDefault(); appZoom(e.deltaY < 0 ? 1 : -1); } }, { passive: false });
+// mini window: it keeps no state of its own on disk — edits go to the main window, which saves and sends updates back
+const IS_WIDGET = location.hash.startsWith('#/widget');
+const bc = 'BroadcastChannel' in window ? new BroadcastChannel('localnotes') : null;
+const WIDGET_KEYS = ['tasks', 'events', 'scratch'];
+const bcState = () => bc?.postMessage({ type: 'state', tasks: S.tasks, events: S.events, scratch: S.scratch, ics: S.ics, cals: S.settings.cals });
+if (bc) bc.onmessage = ({ data: m }) => {
+  if (!S) return;
+  if (IS_WIDGET && m.type === 'state') {
+    const typing = document.activeElement?.matches('input,textarea');
+    Object.assign(S, { tasks: m.tasks, events: m.events, ics: m.ics }); S.settings.cals = m.cals; if (!typing) S.scratch = m.scratch;
+    if (!typing) viewWidget();
+  }
+  if (!IS_WIDGET && m.type === 'hello') bcState();
+  if (!IS_WIDGET && m.type === 'patch') {
+    WIDGET_KEYS.forEach(k => { if (k in m) S[k] = m[k]; }); save();
+    if (['home', 'tasks', 'calendar', ''].includes(view) && !document.activeElement?.matches('input,textarea,[contenteditable=true]')) route();
+  }
+};
+function viewWidget() {
+  document.body.classList.add('widget');
+  const T = today(), open = S.tasks.filter(t => !t.done).sort(byDue);
+  main.innerHTML = `<div class="wgt"><div class="row"><span class="hico" style="width:34px;height:34px">${icon('home', 17)}</span><div class="htitle" style="flex:1"><b>${new Date().toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long' })}</b><small>${open.length} open task${open.length === 1 ? '' : 's'}</small></div></div>
+    <h3>Tasks</h3><form class="row" style="flex-wrap:nowrap"><input name="t" placeholder="Quick task…" style="flex:1;min-width:0"><input type="date" name="d" value="${T}" style="width:128px"><button>Add</button></form><div class="wlist"></div>
+    <h3>Today</h3><div class="wtoday">${dayItems(T) || '<p class="mut" style="margin:0">Nothing scheduled.</p>'}</div>
+    <h3>Scratch pad</h3><textarea class="wscratch" placeholder="Start writing…">${esc(S.scratch || '')}</textarea></div>`;
+  const list = main.querySelector('.wlist'), draw = () => { list.innerHTML = taskRows(S.tasks.filter(t => !t.done).sort(byDue).slice(0, 12)) || '<p class="mut">Nothing to do</p>'; };
+  bindTasks(list, draw); addTaskForm(main.querySelector('form'), draw); draw();
+  main.querySelector('.wtoday').onclick = itemClick;
+  const sc = main.querySelector('.wscratch'); sc.oninput = () => { S.scratch = sc.value; save(); };
+}
+
 /* ---------- routing ---------- */
 let viewKey = null, currentNote = null, currentFileText = null, insertIntoNote = null, insertImageIntoNote = null, view = 'home';
 document.addEventListener('keydown', e => viewKey?.(e));
@@ -1009,9 +1188,9 @@ document.addEventListener('paste', e => viewPaste?.(e));
 addEventListener('hashchange', route);
 let sideArgs = [];
 function route() {
-  viewKey = viewKeyUp = viewPaste = currentNote = currentFileText = insertIntoNote = insertImageIntoNote = boardSync = null;
+  viewKey = viewKeyUp = viewPaste = currentNote = currentFileText = insertIntoNote = insertImageIntoNote = boardSync = pageCtx = null;
   const [v = 'home', a, b, c] = location.hash.replace(/^#\/?/, '').split('/'); view = v;
-  ({ home: viewHome, notes: () => viewNotes(null, a), nb: () => viewNotebook(a, b, c), tasks: viewTasks, files: () => viewFiles(a),
+  ({ widget: viewWidget, home: viewHome, notes: () => viewNotes(null, a), nb: () => viewNotebook(a, b, c), tasks: viewTasks, files: () => viewFiles(a),
      calendar: viewCalendar, boards: viewBoards, board: () => viewBoard(a), settings: () => viewSettings(a) }[v] || viewHome)();
   renderSide(v, a, b);
   $('#kbdTab').hidden = v !== 'home' && v !== '';
@@ -1154,13 +1333,15 @@ function addResizers(root) {
 }
 
 /* ---------- notebook view: sections | pages (+ chapter points) | page ---------- */
-function ctxMenu(e, items) { // items: [label, fn] | '-' | ['palette', fn(color), current]
+function ctxMenu(e, items) { // items: [label, fn] | '-' | ['palette', fn(color), current] | ['row', [[html, fn, title], …]] (a bar of small buttons)
   e.preventDefault(); document.querySelector('.ctx')?.remove();
   const m = document.createElement('div'); m.className = 'ctx';
-  m.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : it[0] === 'palette' ? `<div class="pal">${SECTION_COLORS.map(c => `<button data-i="${i}" data-c="${c}" style="background:${c}${c === it[2] ? ';outline:2px solid #fff' : ''}"></button>`).join('')}</div>` : `<button data-i="${i}">${it[0]}</button>`).join('');
+  m.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : it[0] === 'palette' ? `<div class="pal">${SECTION_COLORS.map(c => `<button data-i="${i}" data-c="${c}" style="background:${c}${c === it[2] ? ';outline:2px solid #fff' : ''}"></button>`).join('')}</div>`
+    : it[0] === 'row' ? `<div class="ctxbar">${it[1].map(([h, , t], j) => h === '|' ? '<span class="vs"></span>' : `<button data-i="${i}" data-j="${j}" title="${t || ''}">${h}</button>`).join('')}</div>` : `<button data-i="${i}">${it[0]}</button>`).join('');
   document.body.append(m);
   m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 8) + 'px'; m.style.top = Math.min(e.clientY, innerHeight - m.offsetHeight - 8) + 'px';
-  m.onclick = ev => { const b = ev.target.closest('button'); if (!b) return; m.remove(); const it = items[b.dataset.i]; it[0] === 'palette' ? it[1](b.dataset.c) : it[1](); };
+  m.onmousedown = ev => ev.preventDefault(); // keep the text selection for format commands
+  m.onclick = ev => { const b = ev.target.closest('button'); if (!b) return; m.remove(); const it = items[b.dataset.i]; it[0] === 'palette' ? it[1](b.dataset.c) : it[0] === 'row' ? it[1][b.dataset.j][1]() : it[1](); };
   setTimeout(() => addEventListener('pointerdown', function off(ev) { if (!m.contains(ev.target)) { m.remove(); removeEventListener('pointerdown', off); } }));
 }
 // touch: press and hold ~0.5 s = right-click (iPad Safari never fires contextmenu). Pages/sections aren't touch-draggable
@@ -1248,7 +1429,7 @@ function viewNotebook(nbId, secId, pageId) {
   };
   $('#addSec').onclick = () => newSection(nb);
   $('#addPg').onclick = () => newNote(sec.id);
-  $('#nbMenu').onclick = e => ctxMenu(e, [['✏ Rename notebook', async () => { const n = await ask('Notebook name', nb.name); if (n?.trim()) { nb.name = n.trim(); save(); route(); } }], ['＋ New section  (Ctrl+T)', () => newSection(nb)], '-',
+  $('#nbMenu').onclick = e => ctxMenu(e, [['✏ Rename notebook', async () => { const n = await ask('Notebook name', nb.name); if (n?.trim()) { nb.name = n.trim(); save(); route(); } }], ['＋ New section  (Ctrl+T)', () => newSection(nb)], [`${icon('download', 15)} Export notebook as PDF`, () => exportNotebook(nb)], '-',
     ['Delete notebook', () => {
       const n = S.notes.filter(p => p.notebookId === nb.id).length;
       if (!confirm(`Delete notebook "${nb.name}" with all its sections and ${n} page${n === 1 ? '' : 's'}? This can't be undone.`)) return;
@@ -1278,7 +1459,7 @@ function viewIndex(nb) {
     const q = $('#iq').value.toLowerCase(), hit = t => !q || t.toLowerCase().includes(q);
     if (mode === 'toc') $('#idx').innerHTML = sectionsOf(nb.id).map(s => `<div class="ix-sec" style="--c:${s.color}"><h3><a href="#/nb/${nb.id}/${s.id}">${esc(s.name)}</a></h3>${isSealed(s) ? `<p class="mut">${icon('lock', 14)} Locked — open the section to unlock</p>` : pagesOf(s.id).map(p => {
       const hs = headingsOf(p).filter(h => hit(h.text)); if (!hit(p.title || '') && !hs.length) return '';
-      return `<a class="ix-pg lv${p.level || 0}" href="${pageHref(p)}">${esc(p.title || 'Untitled page')} <small>${new Date(p.created).toLocaleDateString()}</small></a>${hs.map(h => `<a class="ix-hd h${h.lv}" href="${pageHref(p)}" data-h="${h.i}">${esc(h.text)}</a>`).join('')}`;
+      return `<a class="ix-pg lv${p.level || 0}" href="${pageHref(p)}">${esc(p.title || 'Untitled page')} <small>${new Date(p.created).toLocaleDateString(LOC)}</small></a>${hs.map(h => `<a class="ix-hd h${h.lv}" href="${pageHref(p)}" data-h="${h.i}">${esc(h.text)}</a>`).join('')}`;
     }).join('') || '<p class="mut">No pages.</p>'}</div>`).join('');
     else {
       const list = entries().filter(x => hit(x.text)).sort((a, b) => a.text.localeCompare(b.text, undefined, { sensitivity: 'base' }));
@@ -1314,9 +1495,9 @@ let pendingHeading = null; // index of a heading to scroll to once the page open
 const TBI = (c, title, inner) => `<button class="ti" data-c="${c}" title="${title}">${inner}</button>`;
 const STYLES = [['p', 'Normal text', 'font-size:14px', 'Ctrl+Alt+0'], ['h1', 'Heading 1', 'font-size:20px;font-weight:700', 'Ctrl+Alt+1'], ['h2', 'Heading 2', 'font-size:17px;font-weight:700', 'Ctrl+Alt+2'], ['h3', 'Heading 3', 'font-size:15px;font-weight:700', 'Ctrl+Alt+3'], ['blockquote', 'Quote', 'font-style:italic;border-left:2px solid #777;padding-left:8px', ''], ['pre', 'Code block', 'font-family:Consolas,monospace', '']];
 const TB = `<button class="tstyle" data-c="style" title="Text style"><span class="tsl">Normal text</span>${icon('down', 14)}</button><span class="vs"></span>
-  ${TBI('bold', 'Bold (Ctrl+B)', '<b>B</b>')}${TBI('italic', 'Italic (Ctrl+I)', '<i style="font-family:Georgia,serif">I</i>')}${TBI('underline', 'Underline (Ctrl+U)', '<u>U</u>')}${TBI('strikeThrough', 'Strikethrough', '<s>S</s>')}<span class="vs"></span>
+  ${TBI('bold', 'Bold (Ctrl+B)', '<b>B</b>')}${TBI('italic', 'Italic (Ctrl+I)', '<i style="font-family:Georgia,serif">I</i>')}${TBI('underline', 'Underline (Ctrl+U)', '<u>U</u>')}${TBI('strikeThrough', 'Strikethrough', '<s>S</s>')}<button class="ti tmenu" data-c="hl" title="Highlight (Ctrl+Alt+H)">${icon('marker', 17)}${icon('down', 12)}</button><span class="vs"></span>
   ${TBI('insertUnorderedList', 'Bulleted list (Ctrl+.)', icon('ul', 18))}${TBI('insertOrderedList', 'Numbered list (Ctrl+/)', icon('ol', 18))}${TBI('check', 'To-do (Ctrl+1)', icon('check', 18))}<button class="ti tmenu" data-c="tags" title="Tags (Ctrl+1–6)">${icon('tag', 17)}${icon('down', 12)}</button><span class="vs"></span>
-  ${TBI('link', 'Link (Ctrl+K)', icon('link', 17))}${TBI('insertHorizontalRule', 'Divider', icon('hr', 18))}<span class="vs"></span>
+  ${TBI('link', 'Link (Ctrl+K)', icon('link', 17))}${TBI('image', 'Insert picture (on iPad: take a photo)', icon('image', 17))}${TBI('insertHorizontalRule', 'Divider', icon('hr', 18))}<span class="vs"></span>
   ${TBI('math', 'Equation (Alt+=)', '<span class="tx">x²</span>')}${TBI('mathd', 'Block equation', '<span class="tx" style="font-style:normal">∑</span>')}<span class="vs"></span>
   ${TBI('removeFormat', 'Clear formatting', icon('clear', 17))}`;
 
@@ -1326,9 +1507,9 @@ function openEditor(el, note, refresh, base) {
   el.innerHTML = `<div class="etop"><select id="nbSel" title="Move to section">${S.notebooks.map(nb => `<optgroup label="${esc(nb.name)}">${sectionsOf(nb.id).map(s => `<option value="${s.id}"${s.id === note.sectionId ? ' selected' : ''}${isSealed(s) ? ' disabled' : ''}>${esc(s.name)}${s.lock ? ' 🔒' : ''}</option>`).join('')}</optgroup>`).join('')}</select>
     <select id="paperSel" title="Paper style">${PAPERS.map(([v, t]) => `<option value="${v}"${(note.paper || 'blank') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
     <select id="pcSel" title="Page colour">${PCOLORS.map(([v, t]) => `<option value="${v}"${(note.pcolor || 'dark') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
-    <span style="flex:1">Edited ${ago(note.updated)}</span><button id="drawBtn" class="tdraw${S.settings.inkRow ? ' on' : ''}" title="Show pen & ink tools (your stylus draws either way in “Stylus draws” mode)">${icon('pen', 15)} Draw</button><button id="delNote">${icon('trash', 16)} Delete</button></div>
-    <input class="title" id="title" placeholder="Title" value="${esc(note.title)}"><div class="pdate">${created.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} &nbsp; ${hm(created)}</div><div class="tb etb">${TB}</div><div class="inkrow"${S.settings.inkRow ? '' : ' hidden'}>${inkBar()}</div>
-    <div class="bodywrap" id="bw"><div class="body paper-${note.paper || 'blank'} pc-${note.pcolor || 'dark'}" id="body" contenteditable="true" spellcheck="true">${note.html}</div><canvas class="ink"></canvas></div>`;
+    <span style="flex:1">Edited ${ago(note.updated)}</span><button id="drawBtn" class="tdraw${S.settings.inkRow ? ' on' : ''}" title="Show pen & ink tools (your stylus draws either way in “Stylus draws” mode)">${icon('pen', 15)} Draw</button><button id="expBtn" title="Export as PDF">${icon('download', 15)} Export</button><button id="delNote">${icon('trash', 16)} Delete</button></div>
+    <input class="title" id="title" placeholder="Title" value="${esc(note.title)}"><div class="pdate">${created.toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} &nbsp; ${hm(created)}</div><div class="tb etb">${TB}</div><div class="inkrow"${S.settings.inkRow ? '' : ' hidden'}>${inkBar()}</div>
+    <div class="bodywrap" id="bw"><div class="body paper-${note.paper || 'blank'} pc-${note.pcolor || 'dark'}" id="body" contenteditable="true" spellcheck="true">${note.html}</div><canvas class="ink"></canvas><div class="imgbar" hidden></div></div><input type="file" id="picIn" accept="image/*" hidden>`;
   const body = $('#body', el), title = $('#title', el);
   body.querySelectorAll('.math').forEach(renderOne);
   body.querySelectorAll('.ntag').forEach(t => { if (NTAGS[t.dataset.tag]) t.innerHTML = icon(NTAGS[t.dataset.tag].ic, 16); t.contentEditable = 'false'; }); // older pages stored emoji
@@ -1343,7 +1524,7 @@ function openEditor(el, note, refresh, base) {
   let fitT; new ResizeObserver(() => { clearTimeout(fitT); fitT = setTimeout(ink.fit, 100); }).observe(body);
   mathGhost(body, $('#bw', el));
   const touch = () => {
-    const c = body.cloneNode(true); c.querySelectorAll('.math').forEach(m => { m.textContent = ''; m.removeAttribute('contenteditable'); });
+    const c = body.cloneNode(true); c.querySelectorAll('.math').forEach(m => { m.textContent = ''; m.removeAttribute('contenteditable'); }); c.querySelectorAll('img.sel').forEach(i => i.classList.remove('sel'));
     note.html = c.innerHTML; note.updated = Date.now(); save(); refresh();
   };
   const insertMath = async (display, range) => {
@@ -1387,13 +1568,16 @@ function openEditor(el, note, refresh, base) {
     if (mod && !e.shiftKey && e.key === '.') return hit(() => fmt('insertUnorderedList'));
     if (mod && !e.shiftKey && e.key === '/') return hit(() => fmt('insertOrderedList'));
     if (mod && e.key.toLowerCase() === 'k') return hit(() => tb.querySelector('[data-c=link]').click());
+    if (mod && e.altKey && e.code === 'KeyH') return hit(() => highlight(HL_COLORS[0][1]));
     if (e.altKey && e.shiftKey && /^Key[DTF]$/.test(e.code)) return hit(() => {
-      const d = new Date(), date = d.toLocaleDateString(), time = hm(d);
+      const d = new Date(), date = d.toLocaleDateString(LOC), time = hm(d);
       document.execCommand('insertText', false, { KeyD: date, KeyT: time, KeyF: `${date} ${time}` }[e.code]);
     });
     if (mod && e.altKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) return hit(() => { setLevel(note, e.code === 'BracketRight' ? 1 : -1); refresh(); });
   };
   body.onclick = async e => {
+    const img = e.target.closest('img'); if (img && body.contains(img)) return selectImg(img);
+    selectImg(null);
     const cb = e.target.closest('input[type=checkbox]');
     if (cb) { cb.toggleAttribute('checked', cb.checked); return touch(); }
     const a = e.target.closest('a');
@@ -1422,6 +1606,8 @@ function openEditor(el, note, refresh, base) {
     const c = b.dataset.c, range = curRange();
     if (c === 'style') return ctxMenu(below(b), STYLES.map(([v, t, css, k]) => [`<span style="flex:1;${css}">${t}</span>${k ? `<kbd>${k}</kbd>` : ''}`, () => { restore(range); fmt('formatBlock', v); updateState(); }]));
     if (c === 'tags') return ctxMenu(below(b), [...Object.entries(NTAGS).map(([k, t], i) => [`${icon(t.ic, 16)}<span style="flex:1">${t.name}</span><kbd>Ctrl+${i + 1}</kbd>`, () => { restore(range); applyTag(k); }]), '-', ['<span style="flex:1;padding-left:26px">Remove tag</span><kbd>Ctrl+0</kbd>', () => { restore(range); applyTag('none'); }]]);
+    if (c === 'hl') return ctxMenu(below(b), [...HL_COLORS.map(([n, col]) => [`<span class="hlsw" style="background:${col}"></span>${n}`, () => { restore(range); highlight(col); }]), '-', ['Remove highlight', () => { restore(range); highlight('transparent'); }]]);
+    if (c === 'image') { picRange = range; return $('#picIn', el).click(); }
     if (c === 'math' || c === 'mathd') return insertMath(c === 'mathd', range);
     if (c === 'check') { restore(range); return applyTag('todo'); }
     if (c === 'link') {
@@ -1429,6 +1615,60 @@ function openEditor(el, note, refresh, base) {
       restore(range); document.execCommand('createLink', false, u);
     } else document.execCommand(c, false, null);
     touch(); updateState();
+  };
+  const highlight = col => { document.execCommand('styleWithCSS', false, true); document.execCommand('hiliteColor', false, col); document.execCommand('styleWithCSS', false, false); touch(); };
+  // pictures: insert (camera on iPad), paste, drop; click one to resize, draw on it or delete it
+  let picRange = null, selImg = null;
+  const imgBar = $('.imgbar', el);
+  const insertPic = async (file, range = picRange) => {
+    const src = await shrinkImage(file, 1600); if (!src) return toast("Couldn't read that picture");
+    const img = Object.assign(document.createElement('img'), { src, className: 'nimg' }); img.style.width = '60%';
+    if (range && body.contains(range.startContainer)) { range.deleteContents(); range.insertNode(img); } else { const p = document.createElement('p'); p.append(img); body.append(p); }
+    touch(); selectImg(img);
+  };
+  $('#picIn', el).onchange = e => { [...e.target.files].forEach(f => insertPic(f)); e.target.value = ''; };
+  body.addEventListener('paste', e => { const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/')); if (!files.length) return; e.preventDefault(); const r = curRange(); files.forEach(f => insertPic(f, r)); });
+  body.addEventListener('drop', e => { const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/')); if (!files.length) return; e.preventDefault(); files.forEach(f => insertPic(f, null)); });
+  const selectImg = img => {
+    selImg?.classList.remove('sel'); selImg = img;
+    if (!img) { imgBar.hidden = true; return; }
+    img.classList.add('sel');
+    imgBar.innerHTML = `${[['S', '30%'], ['M', '50%'], ['L', '75%'], ['Full', '100%']].map(([t, w]) => `<button data-w="${w}" class="${img.style.width === w ? 'on' : ''}">${t}</button>`).join('')}<span class="vs"></span><button data-a="draw">${icon('pen', 14)} Draw on it</button><button data-a="del" title="Delete picture">${icon('trash', 14)}</button>`;
+    imgBar.hidden = false; imgBar.style.top = Math.max(4, img.offsetTop - 46) + 'px'; imgBar.style.left = Math.max(8, img.offsetLeft) + 'px';
+  };
+  body.addEventListener('keydown', () => selImg && selectImg(null));
+  imgBar.onmousedown = e => e.preventDefault();
+  imgBar.onclick = async e => {
+    const b = e.target.closest('button'), img = selImg; if (!b || !img) return;
+    if (b.dataset.w) { img.style.width = b.dataset.w; img.style.maxWidth = '100%'; touch(); return selectImg(img); }
+    if (b.dataset.a === 'del') { const p = img.parentElement; img.remove(); if (p !== body && !p.textContent.trim() && !p.querySelector('img')) p.remove(); selectImg(null); return touch(); }
+    if (b.dataset.a === 'draw') { const out = await annotateImage(img.src); if (out) { img.src = out; touch(); } selectImg(img); }
+  };
+  // right-click (or press-and-hold): format bar where you are + spelling suggestions
+  pageCtx = (x, y, spell) => {
+    const range = curRange(), run = f => () => { restore(range); f(); };
+    const sp = spell?.word ? [...(spell.suggestions || []).slice(0, 5).map(s => [`<b>${esc(s)}</b>`, () => { window.native.spellFix(s); setTimeout(touch, 60); }]), [`Add “${esc(spell.word)}” to dictionary`, () => window.native.spellAdd(spell.word)], '-'] : [];
+    ctxMenu({ preventDefault() { }, clientX: x, clientY: y }, [
+      ['row', [['<b>B</b>', run(() => fmt('bold')), 'Bold'], ['<i>I</i>', run(() => fmt('italic')), 'Italic'], ['<u>U</u>', run(() => fmt('underline')), 'Underline'], ['<s>S</s>', run(() => fmt('strikeThrough')), 'Strikethrough'], ['|'],
+        ...HL_COLORS.slice(0, 4).map(([n, col]) => [`<span class="hlsw" style="background:${col}"></span>`, run(() => highlight(col)), `Highlight ${n.toLowerCase()}`]), ['|'],
+        ['H1', run(() => fmt('formatBlock', 'h1')), 'Heading 1'], ['H2', run(() => fmt('formatBlock', 'h2')), 'Heading 2'], ['¶', run(() => fmt('formatBlock', 'p')), 'Normal text'], ['|'],
+        [icon('ul', 16), run(() => fmt('insertUnorderedList')), 'Bulleted list'], [icon('check', 16), run(() => applyTag('todo')), 'To-do'], [icon('link', 15), () => { restore(range); tb.querySelector('[data-c=link]').click(); }, 'Link'], ['<span class="tx">x²</span>', () => insertMath(false, range), 'Equation']]],
+      '-', ...sp,
+      [`${icon('check', 15)} Fix spelling & grammar (AI)`, async () => {
+        restore(range); let r = curRange(); if (!r || r.collapsed) { const blk = blockOf(); if (!blk) return; r = document.createRange(); r.selectNodeContents(blk); }
+        const fixed = await aiFix(r.toString()); if (fixed == null) return;
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('insertText', false, fixed); touch();
+      }],
+      [`${icon('image', 15)} Insert picture`, () => { picRange = range; $('#picIn', el).click(); }], '-',
+      ['Cut', run(() => document.execCommand('cut'))], ['Copy', run(() => document.execCommand('copy'))], ['Paste', () => { restore(range); window.native?.paste ? window.native.paste() : toast('Use Ctrl+V to paste'); }]
+    ]);
+  };
+  body.addEventListener('contextmenu', e => { if (window.native?.onCtx) return; e.preventDefault(); pageCtx(e.clientX, e.clientY, null); }); // without Electron (iPad web app) show it directly
+  $('#expBtn', el).onclick = e => {
+    const sec = secOf(note.sectionId), nb = S.notebooks.find(n => n.id === note.notebookId);
+    ctxMenu(below(e.currentTarget), [['This page as PDF', () => exportPages(note.title || 'Untitled page', [note])],
+      ...(sec ? [[`Section “${esc(sec.name)}” as PDF`, () => exportPages(sec.name, pagesOf(sec.id))]] : []),
+      ...(nb ? [[`Whole notebook “${esc(nb.name)}” as PDF`, () => exportNotebook(nb)]] : [])]);
   };
   insertImageIntoNote = (src, alt) => { const p = document.createElement('p'), img = Object.assign(document.createElement('img'), { src, alt }); img.style.cssText = 'max-width:100%;border-radius:10px'; p.append(img); body.append(p); touch(); };
   insertIntoNote = text => {
@@ -1486,7 +1726,7 @@ function addTaskForm(form, rerender) {
   };
 }
 function viewTasks() {
-  main.innerHTML = `<div class="page"><h1>Tasks</h1><form id="addT" class="row" style="margin:14px 0"><input name="t" placeholder="Add a task…" style="flex:1" autofocus><input type="date" name="d"><button class="pri">Add</button></form><div id="tl"></div></div>`;
+  main.innerHTML = `<div class="page"><h1>Tasks</h1><form id="addT" class="row" style="margin:14px 0"><input name="t" placeholder="Add a task…" style="flex:1" autofocus><input type="date" name="d" value="${today()}" title="Due date (today by default — clear it for no date)"><button class="pri">Add</button></form><div id="tl"></div></div>`;
   const draw = () => {
     const T = today(), g = { Overdue: [], Today: [], Upcoming: [], 'No date': [], Completed: [] };
     for (const t of S.tasks) g[t.done ? 'Completed' : !t.due ? 'No date' : t.due < T ? 'Overdue' : t.due === T ? 'Today' : 'Upcoming'].push(t);
@@ -1592,7 +1832,7 @@ function itemClick(e) { // shared by full and mini calendar
   if (t) { const task = S.tasks.find(x => x.id === t.dataset.t); task.done = !task.done; save(); route(); return true; }
   if (g) {
     const o = JSON.parse(g.dataset.g);
-    dialog(`<h3>${esc(o.title)}</h3><p class="mut" style="margin:0">${new Date(o.date + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}${o.time ? ' · ' + o.time : ' · all day'}</p>${o.loc ? `<p style="margin:0">${esc(o.loc)}</p>` : ''}<small>From “${esc(o.cal)}” (read-only — edit it in that calendar)</small>`);
+    dialog(`<h3>${esc(o.title)}</h3><p class="mut" style="margin:0">${new Date(o.date + 'T00:00').toLocaleDateString(LOC, { weekday: 'long', month: 'long', day: 'numeric' })}${o.time ? ' · ' + o.time : ' · all day'}</p>${o.loc ? `<p style="margin:0">${esc(o.loc)}</p>` : ''}<small>From “${esc(o.cal)}” (read-only — edit it in that calendar)</small>`);
     return true;
   }
 }
@@ -1600,7 +1840,7 @@ let calM = firstOf(new Date());
 function viewCalendar() {
   const T = today();
   const ym = ymd(calM).slice(0, 7), nEv = S.events.filter(e => e.date.startsWith(ym)).length + S.settings.cals.filter(c => !c.hidden).reduce((a, c) => a + (S.ics[c.id] || []).filter(o => o.date.startsWith(ym)).length, 0), nTk = S.tasks.filter(t => !t.done && t.due?.startsWith(ym)).length;
-  main.innerHTML = `<div class="page" style="max-width:1300px"><div class="vhead"><span class="hico">${icon('calendar', 20)}</span><div class="htitle"><h1>${calM.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h1><small>${nEv} event${nEv === 1 ? '' : 's'} · ${nTk} task${nTk === 1 ? '' : 's'} due this month</small></div><span style="flex:1"></span>
+  main.innerHTML = `<div class="page" style="max-width:1300px"><div class="vhead"><span class="hico">${icon('calendar', 20)}</span><div class="htitle"><h1>${calM.toLocaleDateString(LOC, { month: 'long', year: 'numeric' })}</h1><small>${nEv} event${nEv === 1 ? '' : 's'} · ${nTk} task${nTk === 1 ? '' : 's'} due this month</small></div><span style="flex:1"></span>
     ${S.settings.cals.length ? `<button id="cs" class="ibtn" title="Sync subscribed calendars">${icon('sync', 16)} Sync</button>` : `<a class="btn ibtn" href="#/settings" title="Add your Google / Outlook / iCloud calendar link">${icon('link', 16)} Connect calendar</a>`}
     <div class="seg"><button id="cp" title="Previous month">${icon('left', 16)}</button><button id="ct" title="Jump to this month">Today</button><button id="cn" title="Next month">${icon('right', 16)}</button></div><button class="pri ibtn" id="ce">${icon('plus', 16)} Event</button></div>
     ${S.settings.cals.length ? `<div class="legend" id="legend">${S.settings.cals.map(c => `<label title="${c.err ? esc(c.err) : 'Show / hide'}"><input type="checkbox" data-cal="${c.id}"${c.hidden ? '' : ' checked'} style="accent-color:${c.color}"><span class="cdot" style="background:${c.color}"></span>${esc(c.name)}${c.err ? ' ⚠' : ''}</label>`).join('')}<a class="btn" href="#/settings" style="font-size:12px;padding:3px 10px">＋ Add calendar</a></div>` : ''}
@@ -1616,7 +1856,7 @@ function viewCalendar() {
 
 /* ---------- home: widget board ---------- */
 let miniM = firstOf(new Date()), miniSel = today();
-const dayLabel = ds => { const d = new Date(), t = new Date(); t.setDate(d.getDate() + 1); return ds === ymd(d) ? 'Today' : ds === ymd(t) ? 'Tomorrow' : new Date(ds + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
+const dayLabel = ds => { const d = new Date(), t = new Date(); t.setDate(d.getDate() + 1); return ds === ymd(d) ? 'Today' : ds === ymd(t) ? 'Tomorrow' : new Date(ds + 'T00:00').toLocaleDateString(LOC, { weekday: 'long', month: 'short', day: 'numeric' }); };
 const errText = e => e.message.replace(/^Error invoking remote method '\w+': (Error: )?/, '');
 
 // focus timer keeps running while you move around the app
@@ -1664,7 +1904,7 @@ const WIDGETS = {
       const q = s => w.querySelector(s);
       const mini = () => {
         const T = today();
-        q('[data-ml]').textContent = miniM.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+        q('[data-ml]').textContent = miniM.toLocaleDateString(LOC, { month: 'long', year: 'numeric' });
         q('.mini').innerHTML = dows().map(d => `<span class="h">${d[0]}</span>`).join('') + monthDays(miniM).map(d => {
           const ds = ymd(d);
           return `<span data-d="${ds}" class="${d.getMonth() !== miniM.getMonth() ? 'out ' : ''}${ds === T ? 'tdy ' : ''}${ds === miniSel ? 'sel ' : ''}${hasItems(ds) ? 'has' : ''}">${d.getDate()}</span>`;
@@ -1725,7 +1965,7 @@ const WIDGETS = {
   } },
   tasks: { name: 'Tasks', col: 1, make: () => ({
     title: '<a href="#/tasks">Tasks ›</a>', tools: `<small>${S.tasks.filter(t => !t.done).length} open</small>`,
-    body: '<section class="box"><form class="row" style="flex-wrap:nowrap;margin-bottom:6px"><input name="t" placeholder="Quick task…" style="flex:1;min-width:0"><input type="date" name="d" style="width:130px"><button>Add</button></form><div class="hlist"></div></section>',
+    body: '<section class="box"><form class="row" style="flex-wrap:nowrap;margin-bottom:6px"><input name="t" placeholder="Quick task…" style="flex:1;min-width:0"><input type="date" name="d" value="' + today() + '" style="width:130px"><button>Add</button></form><div class="hlist"></div></section>',
     bind: w => { const el = w.querySelector('.hlist'), draw = () => { el.innerHTML = taskRows(S.tasks.filter(t => !t.done).sort(byDue).slice(0, 10)) || '<p class="mut">Nothing to do</p>'; }; bindTasks(el, draw); addTaskForm(w.querySelector('form'), draw); draw(); }
   }) },
   scratch: { name: 'Scratch pad', col: 1, make: () => ({
@@ -1737,7 +1977,7 @@ const WIDGETS = {
       w.querySelector('[data-s2n]').onclick = () => {
         if (!sc.value.trim()) return;
         const sec = defaultSection();
-        S.notes.push({ id: uid(), title: 'Scratch ' + new Date().toLocaleString(), notebookId: sec.notebookId, sectionId: sec.id, level: 0, order: Date.now(), created: Date.now(), updated: Date.now(), html: sc.value.split('\n').map(l => `<p>${esc(l) || '<br>'}</p>`).join('') });
+        S.notes.push({ id: uid(), title: 'Scratch ' + new Date().toLocaleString(LOC), notebookId: sec.notebookId, sectionId: sec.id, level: 0, order: Date.now(), created: Date.now(), updated: Date.now(), html: sc.value.split('\n').map(l => `<p>${esc(l) || '<br>'}</p>`).join('') });
         S.scratch = ''; save(); route();
       };
     }
@@ -1771,14 +2011,18 @@ const WIDGETS = {
     };
   } },
   formulas: { name: 'Formula sheet', col: 1, make: () => ({
-    title: 'Formula sheet', tools: '<button data-add>＋ Formula</button>',
-    body: `<section class="box fs">${(S.formulas ||= []).map((f, i) => `<div class="frm" data-i="${i}" title="Click to copy as $LaTeX$"><span class="math" data-tex="${esc(f)}"></span><button class="x" data-rm="${i}" title="Remove">✕</button></div>`).join('') || '<p class="mut" style="margin:0">Pin equations you use often. Click one to copy it, then paste into a note.</p>'}</section>`,
+    title: 'Formula sheet', tools: '<button data-add>＋ Formula</button><label class="btn" title="Add a picture or a photo of a formula sheet">＋ Picture<input type="file" accept="image/*" multiple hidden data-pic></label>',
+    body: `<section class="box fs">${(S.formulas ||= []).map((f, i) => typeof f === 'object' ? `<div class="frm fimg" data-i="${i}" title="Click to view"><img src="${f.img}" alt=""><span>${esc(f.name || '')}</span><button class="x" data-rm="${i}" title="Remove">✕</button></div>`
+      : `<div class="frm" data-i="${i}" title="Click to copy as $LaTeX$"><span class="math" data-tex="${esc(f)}"></span><button class="x" data-rm="${i}" title="Remove">✕</button></div>`).join('') || '<p class="mut" style="margin:0">Pin equations you use often (click one to copy it), or add pictures of formula sheets.</p>'}</section>`,
     bind: w => {
       w.querySelectorAll('.math').forEach(renderOne);
       w.querySelector('[data-add]').onclick = async () => { const t = await ask('Formula (LaTeX)', '', true); if (t?.trim()) { S.formulas.push(t.trim()); save(); viewHome(); } };
+      w.querySelector('[data-pic]').onchange = async e => { for (const file of e.target.files) { const img = await shrinkImage(file, 1600); if (img) S.formulas.push({ img, name: file.name.replace(/\.[^.]+$/, '') }); } save(); viewHome(); };
       w.querySelector('.fs').onclick = e => {
         const rm = e.target.closest('[data-rm]'); if (rm) { S.formulas.splice(+rm.dataset.rm, 1); save(); viewHome(); return; }
-        const f = e.target.closest('.frm'); if (f) { navigator.clipboard.writeText(`$${S.formulas[f.dataset.i]}$`); f.classList.add('copied'); setTimeout(() => f.classList.remove('copied'), 900); }
+        const f = e.target.closest('.frm'); if (!f) return; const item = S.formulas[f.dataset.i];
+        if (typeof item === 'object') return dialog(`<h3>${esc(item.name || 'Picture')}</h3><img src="${item.img}" style="max-width:100%;max-height:70vh;border-radius:8px">`);
+        navigator.clipboard.writeText(`$${item}$`); f.classList.add('copied'); setTimeout(() => f.classList.remove('copied'), 900);
       };
     }
   }) },
@@ -1791,7 +2035,7 @@ const WIDGETS = {
       new ResizeObserver(() => ink.fit()).observe(host);
       w.querySelector('[data-wb]').onclick = () => {
         if (!S.inkpad?.length) return;
-        const b = { id: uid(), name: 'Ink pad ' + new Date().toLocaleDateString(), bg: 'dots', dark: false, updated: Date.now(),
+        const b = { id: uid(), name: 'Ink pad ' + new Date().toLocaleDateString(LOC), bg: 'dots', dark: false, updated: Date.now(),
           items: S.inkpad.map(s => ({ k: 'ink', ...s, c: s.c === '#e8e8e8' ? '#111111' : s.c })) };
         S.boards.push(b); S.inkpad = []; save(); location.hash = '#/board/' + b.id;
       };
@@ -1828,11 +2072,12 @@ function homeLayout() {
 
 function viewHome() {
   const h = new Date().getHours(), L = homeLayout(), made = {};
-  main.innerHTML = `<div class="home"><div class="row" style="align-items:flex-start"><div style="flex:1"><h1>${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}</h1><p class="mut" style="margin:0">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div><a class="btn" href="#/settings/widgets">${icon('settings', 16)} Customize</a></div>
+  main.innerHTML = `<div class="home"><div class="row" style="align-items:flex-start"><div style="flex:1"><h1>${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}</h1><p class="mut" style="margin:0">${new Date().toLocaleDateString(LOC, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div>${window.native?.openWidget ? `<button class="btn" id="miniWin" title="A small always-on-top window with your tasks, today and the scratch pad">${icon('fit', 16)} Mini window</button>` : ''}<a class="btn" href="#/settings/widgets">${icon('settings', 16)} Customize</a></div>
     <div class="hcols">${L.cols.map((col, ci) => `<div class="hcol" data-col="${ci}">${col.filter(id => WIDGETS[id] && !L.hidden[id]).map(id => {
       const m = made[id] = WIDGETS[id].make();
       return `<div class="widget sz-${L.size[id] || 'fit'}${L.collapsed[id] ? ' shut' : ''}" data-w="${id}"><div class="wh"><span class="grip" draggable="true" title="Drag to move">⠿</span><button class="fold" title="Collapse / expand">${icon('down', 16)}</button><h3>${m.title}</h3>${m.tools || ''}</div><div class="wb">${m.body}</div></div>`;
     }).join('')}</div>`).join('')}</div></div>`;
+  if ($('#miniWin')) $('#miniWin').onclick = () => window.native.openWidget();
   for (const id in made) made[id].bind?.(main.querySelector(`[data-w="${id}"]`));
   // drag a widget by its grip; it snaps into the slot under the cursor in either column
   let dragId = null; const ph = document.createElement('div'); ph.className = 'wph';
@@ -1957,7 +2202,7 @@ function renderStickies(layer, list, k, save) { // k = CSS px per stored unit
     el.className = 'sticky' + (st.open ? ' open' : '') + (st.x * k > layer.clientWidth - 300 ? ' left' : '');
     el.dataset.noink = ''; el.style.left = st.x * k + 'px'; el.style.top = st.y * k + 'px'; el.style.setProperty('--sc', st.color);
     const mark = () => st.text || st.ink?.length ? '≡' : '';
-    el.innerHTML = `<button class="stk-ic" title="${esc(st.text.slice(0, 120)) || 'Sticky note'} — click to open, drag to move">${mark()}</button><div class="stk-card"><div class="stk-h">${STICKY_COLORS.map(c => `<button class="stk-c" data-c="${c}" style="background:${c}"></button>`).join('')}<span style="flex:1"></span>${hwOn() ? '<button data-totext title="Turn the handwriting into typed text">Aa</button>' : ''}<button data-clrink title="Clear handwriting">${icon('clear', 14)}</button><button data-del title="Delete note">${icon('trash', 14)}</button><button data-min title="Collapse">—</button></div><textarea placeholder="Type a note…">${esc(st.text)}</textarea><div class="stk-ink" title="Write or draw here with your pen (or mouse)"><canvas class="ink"></canvas></div><small>${new Date(st.at).toLocaleString()}</small></div>`;
+    el.innerHTML = `<button class="stk-ic" title="${esc(st.text.slice(0, 120)) || 'Sticky note'} — click to open, drag to move">${mark()}</button><div class="stk-card"><div class="stk-h">${STICKY_COLORS.map(c => `<button class="stk-c" data-c="${c}" style="background:${c}"></button>`).join('')}<span style="flex:1"></span>${hwOn() ? '<button data-totext title="Turn the handwriting into typed text">Aa</button>' : ''}<button data-clrink title="Clear handwriting">${icon('clear', 14)}</button><button data-del title="Delete note">${icon('trash', 14)}</button><button data-min title="Collapse">—</button></div><textarea placeholder="Type a note…">${esc(st.text)}</textarea><div class="stk-ink" title="Write or draw here with your pen (or mouse)"><canvas class="ink"></canvas></div><small>${new Date(st.at).toLocaleString(LOC)}</small></div>`;
     const ic = el.querySelector('.stk-ic'), ta = el.querySelector('textarea'), inkHost = el.querySelector('.stk-ink');
     // handwriting area inside the card: any input draws, dark ink, its own undo stack
     const ink = attachInk({ undo: [], surfaces: [], sync() { } }, { host: inkHost, canvas: inkHost.querySelector('canvas'), list: () => st.ink ||= [], save: () => { ic.textContent = mark(); save(); }, always: true, pen: { c: '#2b2400', w: 2 }, size: () => [226, 120] });
@@ -2159,7 +2404,7 @@ function viewFiles(id) {
     pdfNative[sel.id] ? nativePdf(sel, blob) : pdfPages(sel, blob);
   });
 }
-const pdfNative = {};
+const pdfNative = {}, pdfZoom = {};
 function nativePdf(sel, blob) { // Chromium's own viewer: zoom, print, text selection
   const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
   $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="pview" title="Back to pages with pen and sticky notes">${icon('sticky', 16)} Notes &amp; pen view</button></div><iframe src="${url}"></iframe></div>`;
@@ -2172,8 +2417,17 @@ function addSticky(list) {
 }
 async function pdfPages(sel, blob) { // pdf.js pages, each with a pen layer and sticky notes (kept in the app, not in the PDF)
   const fb = $('#fbody');
-  fb.innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="pstk" title="Add a sticky note to the selected page">${icon('sticky', 16)} Sticky</button><button id="pnat" title="Built-in viewer: zoom, print, select text">Native viewer</button><small id="pinfo" style="align-self:center;margin-left:6px">Loading…</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
+  const zoom = pdfZoom[sel.id] || 1;
+  fb.innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="pstk" title="Add a sticky note to the selected page">${icon('sticky', 16)} Sticky</button><div class="seg" style="height:30px"><button data-pz="-1" title="Zoom out (Ctrl+−, Ctrl+scroll)">−</button><button data-pz="0" title="Fit width">${Math.round(zoom * 100)}%</button><button data-pz="1" title="Zoom in (Ctrl+=)">+</button></div><button id="pnat" title="Built-in viewer: print, select text">Native viewer</button><small id="pinfo" style="align-self:center;margin-left:6px">Loading…</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
   $('#pnat').onclick = () => { pdfNative[sel.id] = true; nativePdf(sel, blob); };
+  const setZoom = step => { // re-lays the pages out at the new size, keeping your place
+    const d = $('#deck'), at = d ? d.scrollTop / Math.max(1, d.scrollHeight) : 0;
+    pdfZoom[sel.id] = step === 0 ? 1 : Math.max(.5, Math.min(3, zoom * (step > 0 ? 1.25 : .8)));
+    pdfPages(sel, blob).then(() => { const n = $('#deck'); if (n) n.scrollTop = at * n.scrollHeight; });
+  };
+  fb.querySelector('.seg').onclick = e => { const b = e.target.closest('[data-pz]'); if (b) setZoom(+b.dataset.pz); };
+  let wheelT; fb.onwheel = e => { if (!e.ctrlKey) return; e.preventDefault(); e.stopPropagation(); clearTimeout(wheelT); wheelT = setTimeout(() => setZoom(e.deltaY < 0 ? 1 : -1), 120); }; // property, not addEventListener: #fbody outlives re-renders
+  viewKey = e => { if ((e.ctrlKey || e.metaKey) && ['=', '+', '-', '0'].includes(e.key) && !e.target.closest?.('input,textarea')) { e.preventDefault(); setZoom(e.key === '0' ? 0 : e.key === '-' ? -1 : 1); } };
   let pdf;
   try {
     const pdfjs = await import('./lib/pdfjs-dist/build/pdf.min.mjs');
@@ -2181,7 +2435,7 @@ async function pdfPages(sel, blob) { // pdf.js pages, each with a pen layer and 
     pdf = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
   } catch (e) { console.warn('pdf.js unavailable, using the built-in viewer', e); return nativePdf(sel, blob); }
   if (!fb.isConnected) return;
-  const deckEl = $('#deck'), g = inkGroup(fb.querySelector('.inkbar')), W = Math.min(1100, deckEl.clientWidth - 90), k = W / 1000, dpr = devicePixelRatio || 1;
+  const deckEl = $('#deck'), g = inkGroup(fb.querySelector('.inkbar')), W = Math.round(Math.min(1100, deckEl.clientWidth - 90) * zoom), k = W / 1000, dpr = devicePixelRatio || 1;
   sel.ink = Array.isArray(sel.ink) || !sel.ink ? {} : sel.ink; sel.stickies ||= {};
   let act = 0;
   const wraps = [], select = i => { act = i; wraps.forEach((w, j) => w.classList.toggle('act', j === i)); };
@@ -2308,7 +2562,7 @@ function viewBoard(id) {
         <button data-t="select" title="Lasso select (V) — drag around ink and items">${icon('lasso', 18)}</button><button data-t="pen" title="Pen (P)">${icon('pen', 18)}</button><button data-t="hl" title="Highlighter (H)">${icon('marker', 18)}</button><button data-t="eraser" title="Eraser (E) — pen eraser end and right-drag also erase">${icon('eraser', 18)}</button><span class="vs"></span>
         ${COLORS.map(c => `<button class="sw" data-col="${c}" style="background:${c}"></button>`).join('')}<input type="range" id="wbSz" min="1" max="24" value="${pen.size}" title="Pen size"><span class="vs"></span>
         <button data-t="text" title="Text (T) — click to type">${icon('text', 18)}</button><button data-t="note" title="Sticky note (N) — click to place">${icon('sticky', 18)}</button><button data-a="img" title="Insert image (or paste / drag one in)">${icon('image', 18)}</button><span class="vs"></span>
-        <button data-a="shapes" title="Ink to shape (Ctrl+Shift+S)">◯△</button><button data-a="scratch" title="Scratch-out: scribble over ink to erase">✗≈</button>
+        <button data-a="shapes" title="Ink to shape (Ctrl+Shift+S)">◯△</button><button data-a="scratch" title="Scratch-out: scribble over ink to erase">✗≈</button><button data-a="finger" title="Finger draws (iPad / touchscreen) — off: one finger pans. Two fingers always pan and pinch-zoom">☝</button>
       </div>
       <div class="wb-zoom"><button data-z="out" title="Zoom out (Ctrl+−)">−</button><button data-z="reset" id="wbZl" title="Back to 100%">100%</button><button data-z="in" title="Zoom in (Ctrl+=)">+</button><button data-z="fit" title="Fit everything on screen">${icon('fit', 15)}</button></div>
       <input type="file" id="wbImg" accept="image/*" multiple hidden></div></div>`;
@@ -2433,7 +2687,7 @@ function viewBoard(id) {
   function syncTools() {
     main.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('on', x.dataset.t === tool));
     main.querySelectorAll('.wb-tools [data-col]').forEach(x => x.classList.toggle('on', x.dataset.col === pen.color));
-    main.querySelector('[data-a=shapes]').classList.toggle('on', inkState.shapes); main.querySelector('[data-a=scratch]').classList.toggle('on', inkState.scratch);
+    main.querySelector('[data-a=shapes]').classList.toggle('on', inkState.shapes); main.querySelector('[data-a=scratch]').classList.toggle('on', inkState.scratch); main.querySelector('[data-a=finger]').classList.toggle('on', inkState.mode === 'draw');
     $('#wbTheme').innerHTML = b.dark ? `${icon('sun', 16)} Light` : `${icon('moon', 16)} Dark`;
     main.querySelectorAll('[data-bg]').forEach(x => x.classList.toggle('on', x.dataset.bg === b.bg));
     $('#wbMeta').textContent = `${b.items.length} item${b.items.length === 1 ? '' : 's'} · edited ${ago(b.updated)}`;
@@ -2468,17 +2722,18 @@ function viewBoard(id) {
 
   // ---- pointer input: pen/mouse draw, touch pans, two fingers pinch, Space/middle-drag pans
   const ptrs = new Map(); let actPtr = null; // the pointer that owns the current action — a palm landing mid-stroke must not join in
+  let actTouch = false;
   const other = e => act && act.k !== 'pinch' && actPtr != null && e.pointerId !== actPtr;
   stage.oncontextmenu = e => e.preventDefault();
   stage.onpointerdown = e => {
     if (e.target.closest('.wb-tools,.wb-zoom,.wb-selbox,[contenteditable=true]')) return;
-    if (e.pointerType === 'touch' && act && actPtr != null && act.k !== 'pan') return; // palm while the pen draws, erases or selects
+    if (e.pointerType === 'touch' && act && actPtr != null && act.k !== 'pan' && !actTouch) return; // palm while the pen draws, erases or selects (a finger stroke + second finger = pinch)
     try { stage.setPointerCapture(e.pointerId); } catch { }
-    actPtr = e.pointerId;
+    actPtr = e.pointerId; actTouch = e.pointerType === 'touch';
     ptrs.set(e.pointerId, [e.clientX, e.clientY]);
     if (ptrs.size === 2) { const [p, q] = [...ptrs.values()]; act = { k: 'pinch', d: Math.hypot(p[0] - q[0], p[1] - q[1]), m: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] }; clearLive(); return; }
     const [sx, sy] = local(e), [wx, wy] = toW(sx, sy);
-    if (e.pointerType === 'touch' || e.button === 1 || space || e.ctrlKey || (pen.penOnly && e.pointerType === 'mouse' && tool !== 'select')) { act = { k: 'pan', sx: e.clientX, sy: e.clientY, ox: V.ox, oy: V.oy }; stage.classList.add('panning'); return; }
+    if ((e.pointerType === 'touch' && (inkState.mode !== 'draw' || tool === 'select')) || e.button === 1 || space || e.ctrlKey || (pen.penOnly && e.pointerType === 'mouse' && tool !== 'select')) { act = { k: 'pan', sx: e.clientX, sy: e.clientY, ox: V.ox, oy: V.oy }; stage.classList.add('panning'); return; }
     const objEl = e.target.closest('.wbo');
     if (tool === 'eraser' || e.button === 2 || e.button === 5 || (e.buttons & 32)) { act = { k: 'erase', removed: [] }; eraseAt(wx, wy); return; }
     if (tool === 'pen' || tool === 'hl') { act = { k: 'ink', s: { k: 'ink', t: tool, c: pen.color, w: pen.size / V.z, pts: [] } }; addPt(e); return; }
@@ -2552,6 +2807,7 @@ function viewBoard(id) {
     if (t.dataset.col) { pen.color = t.dataset.col; if (sel.size) recolor(pen.color); else if (!['pen', 'hl', 'text'].includes(tool)) setTool('pen'); syncTools(); }
     if (t.dataset.a === 'img') $('#wbImg').click();
     if (t.dataset.a === 'shapes') { toggleShapes(); syncTools(); }
+    if (t.dataset.a === 'finger') { inkState.mode = inkState.mode === 'draw' ? 'pen' : 'draw'; refreshInkUI(); syncTools(); toast(inkState.mode === 'draw' ? '☝ Finger draws — two fingers pan' : 'One finger pans — pen draws'); }
     if (t.dataset.a === 'scratch') { inkState.scratch = !inkState.scratch; syncTools(); }
   };
   $('#wbSz').oninput = e => pen.size = +e.target.value;
@@ -2775,7 +3031,8 @@ const SHORTCUTS = [
   ['Math', [['Alt+=', 'Insert equation (block on an empty line)'], ['12*4 + 7 =', 'In a page: the answer shows in grey — Tab / Enter keeps it'], ['… =', 'An equation ending in = shows its answer'], ['$ … $', 'Inline math as you type'], ['$$ … $$', 'Block math as you type'], ['Click a formula', 'Edit it']]],
   ['Tags', [['Ctrl+1', 'To Do'], ['Ctrl+2', 'Important'], ['Ctrl+3', 'Question'], ['Ctrl+4', 'Remember for later'], ['Ctrl+5', 'Definition'], ['Ctrl+6', 'Critical'], ['Ctrl+0', 'Remove tag']]],
   ['Pages & sections', [['Ctrl+Alt+]', 'Make subpage'], ['Ctrl+Alt+[', 'Promote subpage'], ['Drag page', 'Reorder, or drop on a section to move'], ['Right-click', 'More page / section options'], ['Double-click section', 'Rename']]],
-  ['Pen & ink', [['Ctrl+Shift+D', 'Switch: type only → stylus draws → draw with anything'], ['Ctrl+Shift+S', 'Ink to shape on / off (on by default)'], ['Ctrl+Shift+E', 'Pen ↔ eraser'], ['Scribble over ink', 'Scratch-out erase'], ['Pen eraser end', 'Erase'], ['Right-drag (whiteboard)', 'Erase']]],
+  ['Pages extras', [['Ctrl+Alt+H', 'Highlight (yellow) — more colours in the toolbar'], ['Right-click', 'Format bar + spelling suggestions where you are'], ['Click a picture', 'Resize, draw on it, delete'], ['Ctrl+V / drop', 'Paste or drop a picture'], ['Ctrl+=  /  Ctrl+−  /  Ctrl+0', 'Zoom the app in / out / reset (Ctrl+scroll too)']]],
+  ['Pen & ink', [['Ctrl+Z  /  Ctrl+Y', 'Undo / redo ink (right after drawing)'], ['Ctrl+Shift+D', 'Switch: type only → stylus draws → draw with anything (fingers too; ☝ on whiteboards)'], ['Ctrl+Shift+S', 'Ink to shape on / off (on by default)'], ['Ctrl+Shift+E', 'Pen ↔ eraser'], ['Scribble over ink', 'Scratch-out erase'], ['Pen eraser end', 'Erase'], ['Right-drag (whiteboard)', 'Erase']]],
   ['Whiteboard', [['Ctrl + drag', 'Pan around the canvas'], ['Space + drag  /  middle-drag', 'Pan'], ['Scroll  /  Shift+scroll', 'Move up-down / sideways'], ['Ctrl+scroll', 'Zoom at the cursor'], ['Ctrl+=  /  Ctrl+−  /  Ctrl+0', 'Zoom in / out / 100%'], ['Ctrl+1', 'Fit everything'], ['V / P / H / E', 'Select / pen / highlighter / eraser'], ['T / N', 'Text / sticky note'], ['Ctrl+A / D / C / V', 'Select all / duplicate / copy / paste'], ['Delete', 'Delete selection'], ['Ctrl+Z  /  Ctrl+Y', 'Undo / redo'], ['Double-click', 'Edit a note or text'], ['Ctrl+V  /  drag in', 'Paste or drop an image']]]
 ];
 const kbdHTML = q => SHORTCUTS.map(([g, rows]) => { const r = rows.filter(([k, d]) => !q || (k + ' ' + d).toLowerCase().includes(q)); return r.length ? `<h4>${g}</h4>${r.map(([k, d]) => `<div class="kb"><span>${esc(d)}</span><span>${k.split('  /  ').map(x => `<kbd>${esc(x)}</kbd>`).join(' ')}</span></div>`).join('')}` : ''; }).join('') || '<p class="mut">No match.</p>';
@@ -2799,6 +3056,12 @@ document.addEventListener('keydown', e => {
   if (mod && e.shiftKey && e.code === 'KeyC') return go(() => toggleCalc());
   if (e.altKey && !mod && digit) return go(() => location.hash = '#/' + ['home', 'notes', 'tasks', 'files', 'calendar', 'boards'][digit - 1]);
   if (!mod) return;
+  // Ctrl+Z / Ctrl+Y undo ink when you drew last (typing keeps normal text undo)
+  if (!e.altKey && (e.code === 'KeyZ' || e.code === 'KeyY') && lastInkG?.bar?.isConnected && (lastInkAt > lastTypeAt || !e.target.closest?.('[contenteditable=true],input,textarea')))
+    return go(() => (e.code === 'KeyY' || e.shiftKey) ? inkRedo(lastInkG) : inkUndo(lastInkG));
+  if (!e.shiftKey && !e.altKey && (e.key === '=' || e.key === '+')) return go(() => appZoom(1));
+  if (!e.shiftKey && !e.altKey && e.key === '-') return go(() => appZoom(-1));
+  if (!e.shiftKey && !e.altKey && e.key === '0') return go(() => appZoom(0));
   if (e.altKey && e.code === 'KeyN') return go(() => newNote(curSection, { after: currentNote }));
   if (e.shiftKey && e.code === 'KeyN') return go(newNotebook);
   if (!e.altKey && e.code === 'KeyN') return go(() => newNote(curSection));
@@ -3464,8 +3727,7 @@ if (NATIVE) window.native.onUpdate(u => {
   t.onclick = async e => { if (e.target.classList.contains('pri')) { await window.flushNow(); window.native.installUpdate(); } else if (e.target.tagName === 'BUTTON') t.remove(); };
   document.body.append(t);
 });
-load().then(() => { route(); syncCals(); }).catch(err => { main.innerHTML = `<div class="page"><h1>Could not open storage</h1><p>${esc(err.message)}</p></div>`; });
+load().then(() => { route(); if (IS_WIDGET) bc?.postMessage({ type: 'hello' }); else syncCals(); }).catch(err => { main.innerHTML = `<div class="page"><h1>Could not open storage</h1><p>${esc(err.message)}</p></div>`; });
 </script>
-<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(e => console.warn('offline cache unavailable', e)));</script>
 </body>
 </html>
