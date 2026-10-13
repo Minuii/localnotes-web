@@ -442,6 +442,34 @@ dialog{background:var(--panel);color:var(--tx);border:1px solid var(--line);bord
 dialog::backdrop{background:#0009}
 dialog form{display:grid;gap:10px}
 .prev{min-height:44px;padding:8px;background:var(--panel2);border-radius:8px;overflow:auto}
+/* calculator panel */
+#calc{position:fixed;right:16px;top:16px;width:372px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);background:var(--panel);border:1px solid var(--line);border-radius:14px;z-index:16;display:flex;flex-direction:column;box-shadow:0 10px 40px #000a;animation:slidein .18s ease-out}
+#calc[hidden]{display:none}
+#calc header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+#calc header .seg{height:30px}#calc header .seg button{padding:0 9px;font-size:12px}
+.cpane{overflow:auto;flex:1;min-height:0}
+.cdisp{margin:12px 12px 6px;background:#151515;border:1px solid #2f2f2f;border-radius:10px;padding:8px 10px}
+.cdisp input{width:100%;background:none;border:none;padding:0;font:16px/1.5 Consolas,"SF Mono",monospace;outline:none!important}
+.cres{text-align:right;font-size:26px;line-height:1.3;font-variant-numeric:tabular-nums;min-height:34px;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+.cres.err{color:#ff8a8a;font-size:15px;padding-top:8px}
+.cmeta{display:flex;gap:6px;align-items:center;padding:0 12px 4px}
+.cmeta .seg{height:28px}.cmeta .seg button{font-size:11px;padding:0 8px;min-width:0}.cmeta>button{height:28px;padding:0 9px;font-size:12px}
+.ckeys{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;padding:6px 12px 10px}
+.ckeys button{height:34px;padding:0;justify-content:center;font-size:13px;background:#262626;border-color:#333;border-radius:8px;color:#d6d6d6}
+.ckeys button:hover{background:#303030}
+.ckeys .n{background:#353535;border-color:#404040;font-size:16px;color:#fff}
+.ckeys .op{background:#2f2f2f;font-size:16px;color:#fff}
+.ckeys .del{background:#3a2a2a;border-color:#4a3434;color:#ffb3b3}
+.ckeys .eq{background:var(--acc);border-color:var(--acc);color:#fff;font-size:17px}
+.chist{border-top:1px solid var(--line);padding:6px 8px 10px;font:12px Consolas,"SF Mono",monospace}
+.chist div{display:flex;justify-content:space-between;gap:10px;padding:4px 6px;border-radius:6px;cursor:pointer}
+.chist div:hover{background:var(--panel2)}.chist span:first-child{color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cform{display:grid;gap:8px;padding:12px}
+.cform .row input{flex:1;min-width:0;width:0}
+.cgrid{display:grid;gap:6px;align-items:center}
+.cgrid input{width:100%;min-width:0;text-align:center}
+.cout{background:#151515;border:1px solid #2f2f2f;border-radius:10px;padding:8px 12px;font:14px/1.8 Consolas,"SF Mono",monospace;white-space:pre-wrap;min-height:40px}
+.ctab{width:100%;border-collapse:collapse;font:13px Consolas,"SF Mono",monospace}.ctab td,.ctab th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:right}.ctab th{color:var(--mut);font-weight:500}
 .webnote{font-size:13px;color:var(--mut);background:var(--panel2);border-radius:8px;padding:8px 10px;margin:0}
 
 /* narrow windows (iPad portrait): slimmer notebook columns, page header wraps instead of overflowing */
@@ -486,6 +514,7 @@ html,body{overscroll-behavior:none}
     <form id="aiForm" class="row" style="flex-wrap:nowrap"><textarea name="q" rows="2" placeholder="Ask anything…"></textarea><button class="pri">Send</button></form>
   </div>
 </section>
+<section id="calc" hidden></section>
 <dialog id="dlg"></dialog>
 <button id="kbdTab" title="Keyboard shortcuts (F1)">⌨ Shortcuts</button>
 <aside id="kbd" hidden><header><b>⌨ Keyboard shortcuts</b><span class="mut" style="font-size:12px">Windows</span><span style="flex:1"></span><button id="kbdClose" title="Close (Esc)">×</button></header><input id="kbdQ" placeholder="Filter shortcuts…"><div id="kbdBody"></div></aside>
@@ -562,6 +591,7 @@ const ICONS = {
   bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
   bookopen: '<path d="M2 5h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2zM22 5h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>',
+  calc: '<rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M8.5 6h7v3.5h-7z"/><path d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01" stroke-width="2.6"/>',
   check: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12 3 3 5-6"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'
 };
 const icon = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
@@ -972,6 +1002,7 @@ function renderSide(v, a, b) {
     ${nav('#/files', 'files', 'Files', v === 'files', S.files.length)}
     ${nav('#/calendar', 'calendar', 'Calendar', v === 'calendar')}
     ${nav('#/boards', 'pen', 'Whiteboards', v === 'boards' || v === 'board')}
+    <a class="nav${$('#calc').hidden ? '' : ' on'}" id="sCalc" title="Calculator (Ctrl+Shift+C)">${icon('calc')}<span class="lbl">Calculator</span></a>
     <div class="sep2"></div>
     <div class="sh">Notebooks <button id="sNb" title="New notebook">${icon('plus', 16)}</button></div>
     ${col ? `<a class="nav" id="sNbs" title="Notebooks">${icon('book')}</a>` : S.notebooks.map(n => `<a href="#/nb/${n.id}" class="nav nbitem${v === 'nb' && a === n.id ? ' on' : ''}" title="${esc(n.name)}">${icon('book', 18)}<span class="lbl">${esc(n.name)}</span><small>${S.notes.filter(x => x.notebookId === n.id).length || ''}</small></a>${v === 'nb' && a === n.id ? sectionsOf(n.id).map(s => `<a href="#/nb/${n.id}/${s.id}" class="nav nbitem secitem${(b || curSection) === s.id ? ' on' : ''}" title="${esc(s.name)}"><span class="cdot" style="background:${s.color}"></span><span class="lbl">${esc(s.name)}</span>${s.lock ? `<small class="lbl">${icon(isSealed(s) ? 'lock' : 'unlock', 12)}</small>` : ''}</a>`).join('') : ''}`).join('')}
@@ -980,6 +1011,7 @@ function renderSide(v, a, b) {
   $('#sToggle').onclick = toggle;
   if (col) $('#sNbs').onclick = toggle;
   $('#sSearch').onclick = focusSearch;
+  $('#sCalc').onclick = () => toggleCalc();
   $('#sNew').onclick = () => newNote(curSection);
   $('#sNb').onclick = () => newNotebook();
 }
@@ -2582,6 +2614,7 @@ function viewSettings(section) {
 
 /* ---------- keyboard shortcuts (Windows) ---------- */
 const SHORTCUTS = [
+  ['Calculator', [['Ctrl+Shift+C', 'Open / close the calculator'], ['Enter', 'Calculate'], ['↑ / ↓', 'Earlier calculations'], ['5+3→A', 'Store in a memory (A–F, M, X, Y)'], ['∫(X², 0, 1)', 'Integral · also d/dx(…, x) and Σ(…, a, b)']]],
   ['General', [['Ctrl+N', 'New page'], ['Ctrl+Alt+N', 'New page below the current one'], ['Ctrl+T', 'New section'], ['Ctrl+Shift+N', 'New notebook'], ['Ctrl+F  /  Ctrl+E', 'Search'], ['Ctrl+J', 'AI assistant'], ['Ctrl+\\', 'Collapse / expand sidebar'], ['Ctrl+,', 'Settings'], ['F1  /  Ctrl+/', 'This shortcuts panel'], ['Ctrl+S', 'Save (everything saves automatically)'], ['Esc', 'Close panels and menus']]],
   ['Go to', [['Alt+1', 'Home'], ['Alt+2', 'Notes'], ['Alt+3', 'Tasks'], ['Alt+4', 'Files'], ['Alt+5', 'Calendar'], ['Alt+6', 'Whiteboards']]],
   ['Writing', [['Ctrl+B / I / U', 'Bold / italic / underline'], ['Ctrl+Alt+1 / 2 / 3', 'Heading 1 / 2 / 3'], ['Ctrl+Alt+0', 'Normal text'], ['Ctrl+.', 'Bulleted list'], ['Ctrl+/', 'Numbered list (in a page)'], ['Ctrl+K', 'Insert link'], ['Ctrl+click', 'Open link'], ['Alt+Shift+D / T / F', 'Insert date / time / both']]],
@@ -2608,7 +2641,8 @@ document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), digit = /^Digit([1-6])$/.exec(e.code)?.[1];
   const go = f => { e.preventDefault(); f(); };
   if (e.key === 'F1' || (mod && !e.shiftKey && e.key === '/')) return go(() => toggleKbd());
-  if (e.key === 'Escape') { document.querySelector('.ctx')?.remove(); toggleKbd(false); $('#ai').hidden = true; return; }
+  if (e.key === 'Escape') { document.querySelector('.ctx')?.remove(); toggleKbd(false); $('#ai').hidden = true; if (!$('#calc').hidden) toggleCalc(false); return; }
+  if (mod && e.shiftKey && e.code === 'KeyC') return go(() => toggleCalc());
   if (e.altKey && !mod && digit) return go(() => location.hash = '#/' + ['home', 'notes', 'tasks', 'files', 'calendar', 'boards'][digit - 1]);
   if (!mod) return;
   if (e.altKey && e.code === 'KeyN') return go(() => newNote(curSection, { after: currentNote }));
@@ -2624,6 +2658,276 @@ document.addEventListener('keydown', e => {
   if (e.shiftKey && e.code === 'KeyE') return go(() => { inkState.tool = pen.tool = inkState.tool === 'eraser' ? 'pen' : 'eraser'; refreshInkUI(); toast(inkState.tool === 'eraser' ? 'Eraser' : 'Pen'); });
   if (e.code === 'KeyS') return go(() => toast('Everything saves automatically ✓'));
 });
+
+/* ---------- calculator: fx-style scientific (expressions, equations, stats, tables) ---------- */
+const CS = () => S.settings.calc ||= { ang: 'deg', vars: {}, hist: [], ans: 0, tab: 'calc', eq: { t: 'quad', v: {} }, stat: '', tbl: { f: 'X²', a: '1', b: '5', s: '1' } };
+const CalcErr = (m = 'Syntax ERROR') => Object.assign(new Error(m), { calc: true });
+const CFUNCS = ['asinh', 'acosh', 'atanh', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'sqrt', 'cbrt', 'abs', 'exp', 'log', 'ln', 'nCr', 'nPr', 'ddx', 'int', 'sum'];
+function calcTokens(src) {
+  const s = src.replace(/d\/dx/g, 'ddx').replace(/->/g, '→').replace(/∫/g, 'int').replace(/Σ/g, 'sum').replace(/\s+/g, ''), t = [];
+  for (let i = 0; i < s.length;) {
+    const rest = s.slice(i), c = s[i], num = /^(\d+\.?\d*|\.\d+)/.exec(rest), fn = CFUNCS.find(n => rest.startsWith(n));
+    if (num) { t.push({ k: 'num', v: parseFloat(num[1]) }); i += num[1].length; }
+    else if (rest.startsWith('⁻¹')) { t.push({ k: 'op', v: 'inv' }); i += 2; }
+    else if (fn) { t.push({ k: 'fn', v: fn }); i += fn.length; }
+    else if (rest.startsWith('Ans')) { t.push({ k: 'ans' }); i += 3; }
+    else if (c === 'π' || c === 'e') { t.push({ k: 'num', v: c === 'π' ? Math.PI : Math.E }); i++; }
+    else if (/[A-FMXY]/.test(c)) { t.push({ k: 'var', v: c }); i++; }
+    else if ('+-−×*÷/^(),!²³%→√∛'.includes(c)) { t.push({ k: 'op', v: { '−': '-', '*': '×', '/': '÷' }[c] || c }); i++; }
+    else throw CalcErr();
+  }
+  return t;
+}
+const cAng = () => CS().ang, toRad = v => cAng() === 'deg' ? v * Math.PI / 180 : cAng() === 'gra' ? v * Math.PI / 200 : v, fromRad = v => cAng() === 'deg' ? v * 180 / Math.PI : cAng() === 'gra' ? v * 200 / Math.PI : v;
+const cFact = n => { if (n < 0 || n !== Math.floor(n) || n > 170) return NaN; let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; };
+const cComb = (n, r, perm) => { if ([n, r].some(x => x !== Math.floor(x)) || r < 0 || n < r) return NaN; let v = 1; for (let i = 0; i < r; i++) v = perm ? v * (n - i) : v * (n - i) / (i + 1); return Math.round(v); };
+function cIntegrate(F, a, b) { // adaptive Simpson
+  const simp = (a, b, fa, fm, fb) => (b - a) / 6 * (fa + 4 * fm + fb);
+  const rec = (a, b, fa, fm, fb, whole, eps, d) => {
+    const m = (a + b) / 2, flm = F((a + m) / 2), frm = F((m + b) / 2), L = simp(a, m, fa, flm, fm), R = simp(m, b, fm, frm, fb);
+    return d <= 0 || Math.abs(L + R - whole) <= 15 * eps ? L + R + (L + R - whole) / 15 : rec(a, m, fa, flm, fm, L, eps / 2, d - 1) + rec(m, b, fm, frm, fb, R, eps / 2, d - 1);
+  };
+  const fa = F(a), fb = F(b), fm = F((a + b) / 2); return rec(a, b, fa, fm, fb, simp(a, b, fa, fm, fb), 1e-11, 18);
+}
+function cCall(n, a) { // a: argument closures; env.X overrides the X memory inside ∫, d/dx, Σ
+  const [f, g, h] = a, need = k => { if (a.length !== k) throw CalcErr(); }, one = fn => (need(1), e => fn(f(e)));
+  const trig = fn => one(v => { const r = fn(toRad(v)); return Math.abs(r) > 1e15 ? NaN : Math.abs(r) < 1e-14 ? 0 : r; });
+  const at = (e, x) => f({ ...e, X: x });
+  switch (n) {
+    case 'sin': return trig(Math.sin); case 'cos': return trig(Math.cos); case 'tan': return trig(Math.tan);
+    case 'asin': return one(v => fromRad(Math.asin(v))); case 'acos': return one(v => fromRad(Math.acos(v))); case 'atan': return one(v => fromRad(Math.atan(v)));
+    case 'sinh': return one(Math.sinh); case 'cosh': return one(Math.cosh); case 'tanh': return one(Math.tanh);
+    case 'asinh': return one(Math.asinh); case 'acosh': return one(Math.acosh); case 'atanh': return one(Math.atanh);
+    case 'sqrt': return one(Math.sqrt); case 'cbrt': return one(Math.cbrt); case 'abs': return one(Math.abs); case 'exp': return one(Math.exp); case 'ln': return one(Math.log);
+    case 'log': return a.length === 2 ? e => Math.log(g(e)) / Math.log(f(e)) : one(Math.log10); // log(base, x) like the fx
+    case 'nCr': need(2); return e => cComb(f(e), g(e), false);
+    case 'nPr': need(2); return e => cComb(f(e), g(e), true);
+    case 'ddx': need(2); return e => { const x = g(e), d = k => (at(e, x + k) - at(e, x - k)) / (2 * k), k = 1e-3 * Math.max(1, Math.abs(x)); return (4 * d(k / 2) - d(k)) / 3; };
+    case 'int': need(3); return e => cIntegrate(x => at(e, x), g(e), h(e));
+    case 'sum': need(3); return e => { const lo = g(e), hi = h(e); if (lo !== Math.floor(lo) || hi !== Math.floor(hi) || hi - lo > 1e6) return NaN; let s = 0; for (let x = lo; x <= hi; x++) s += at(e, x); return s; };
+  }
+  throw CalcErr();
+}
+function calcParse(src) { // -> env => number   (env: { vars, ans, X? })
+  const t = calcTokens(src); let p = 0;
+  const is = v => t[p]?.k === 'op' && t[p].v === v, eat = v => is(v) && ++p;
+  const close = () => { if (!eat(')') && p < t.length) throw CalcErr(); }; // a missing ")" at the very end is fine, like on the fx
+  const starts = x => x && (x.k !== 'op' || '(√∛'.includes(x.v));
+  const expr = () => { const f = sum(); if (!eat('→')) return f; const v = t[p++]; if (v?.k !== 'var') throw CalcErr(); return e => (e.vars[v.v] = f(e)); };
+  const sum = () => { let a = prod(); for (;;) { const x = a; if (eat('+')) { const y = prod(); a = e => x(e) + y(e); } else if (eat('-')) { const y = prod(); a = e => x(e) - y(e); } else return a; } };
+  const prod = () => { let a = unary(); for (;;) { const x = a; if (eat('×')) { const y = unary(); a = e => x(e) * y(e); } else if (eat('÷')) { const y = unary(); a = e => x(e) / y(e); } else if (starts(t[p])) { const y = power(); a = e => x(e) * y(e); } else return a; } }; // 2π, 3(4), 2sin30
+  const unary = () => eat('-') ? (f => e => -f(e))(unary()) : eat('+') ? unary() : power();
+  const power = () => { const b = post(); if (!eat('^')) return b; const x = unary(); return e => b(e) ** x(e); };
+  const post = () => { let a = prim(); for (;;) { const x = a; if (eat('!')) a = e => cFact(x(e)); else if (eat('²')) a = e => x(e) ** 2; else if (eat('³')) a = e => x(e) ** 3; else if (eat('inv')) a = e => 1 / x(e); else if (eat('%')) a = e => x(e) / 100; else return a; } };
+  const group = () => { const f = expr(); close(); return f; };
+  const prim = () => {
+    const x = t[p++]; if (!x) throw CalcErr();
+    if (x.k === 'num') return () => x.v;
+    if (x.k === 'ans') return e => e.ans;
+    if (x.k === 'var') return e => x.v === 'X' && e.X != null ? e.X : e.vars[x.v] ?? 0;
+    if (x.v === '(') return group();
+    if (x.v === '√' || x.v === '∛') { const f = eat('(') ? group() : post(); return x.v === '√' ? e => Math.sqrt(f(e)) : e => Math.cbrt(f(e)); }
+    if (x.k === 'fn') { if (!eat('(')) return cCall(x.v, [power()]); const l = [expr()]; while (eat(',')) l.push(expr()); close(); return cCall(x.v, l); }
+    throw CalcErr();
+  };
+  const f = expr(); if (p < t.length) throw CalcErr(); return f;
+}
+const calcChk = v => { if (!Number.isFinite(v)) throw CalcErr('Math ERROR'); return v; };
+const calcEval = (src, X) => calcChk(calcParse(String(src))({ vars: CS().vars, ans: CS().ans, X }));
+function calcFmt(v) { // 10 significant digits, like the fx display
+  calcChk(v); if (v === 0) return '0';
+  const a = Math.abs(v); if (a >= 1e10 || a < 1e-3) { const [m, x] = v.toExponential(9).split('e'); return `${+m}×10^${+x}`; }
+  return String(+v.toPrecision(10));
+}
+function calcFrac(v) { // "p/q" when v is (to 12 digits) a simple fraction
+  if (!Number.isFinite(v) || Number.isInteger(v) || Math.abs(v) > 1e9) return null;
+  let h0 = 1, h1 = 0, k0 = 0, k1 = 1, x = v;
+  for (let i = 0; i < 30; i++) {
+    const a = Math.floor(x); [h0, h1] = [a * h0 + h1, h0]; [k0, k1] = [a * k0 + k1, k0];
+    if (k0 > 1e5) return null;
+    if (Math.abs(v - h0 / k0) < 1e-12 * Math.max(1, Math.abs(v))) return k0 === 1 ? null : `${h0}/${k0}`;
+    x = 1 / (x - a); if (!Number.isFinite(x)) return null;
+  }
+  return null;
+}
+const calcShow = v => calcFrac(v) || calcFmt(v);
+const calcCx = (re, im) => Math.abs(im) < 1e-10 * Math.max(1, Math.abs(re)) ? calcShow(re) : `${Math.abs(re) < 1e-12 ? '' : calcShow(re) + (im < 0 ? ' − ' : ' + ')}${calcShow(Math.abs(re) < 1e-12 ? im : Math.abs(im))}i`;
+
+const CKEYS = [
+  ['sin', 'sin('], ['cos', 'cos('], ['tan', 'tan('], ['ln', 'ln('], ['log', 'log(', '', 'log(x) or log(base, x)'], ['√', '√('],
+  ['sin⁻¹', 'asin('], ['cos⁻¹', 'acos('], ['tan⁻¹', 'atan('], ['eˣ', 'e^('], ['10ˣ', '10^('], ['∛', '∛('],
+  ['x²', '²'], ['xʸ', '^'], ['x⁻¹', '⁻¹'], ['x!', '!'], ['π', 'π'], ['e', 'e'],
+  ['∫', '∫(', '', 'Integral: ∫(f(X), a, b)'], ['d/dx', 'd/dx(', '', 'Derivative at a point: d/dx(f(X), x)'], ['Σ', 'Σ(', '', 'Sum: Σ(f(X), a, b)'], ['nCr', 'nCr(', '', 'Combinations: nCr(n, r)'], ['nPr', 'nPr(', '', 'Permutations: nPr(n, r)'], ['X', 'X', '', 'Variable X (also A–F, M, Y)'],
+  ['7', '7', 'n'], ['8', '8', 'n'], ['9', '9', 'n'], ['÷', '÷', 'op'], ['DEL', 'del', 'del'], ['AC', 'ac', 'del'],
+  ['4', '4', 'n'], ['5', '5', 'n'], ['6', '6', 'n'], ['×', '×', 'op'], ['(', '('], [')', ')'],
+  ['1', '1', 'n'], ['2', '2', 'n'], ['3', '3', 'n'], ['−', '-', 'op'], [',', ','], ['→', '→', '', 'Store: 5+3→A'],
+  ['0', '0', 'n'], ['.', '.', 'n'], ['×10ˣ', '×10^('], ['+', '+', 'op'], ['Ans', 'Ans'], ['=', 'eq', 'eq']];
+const coarsePtr = matchMedia('(pointer:coarse)');
+let calcJust = false, calcDec = false, calcHi = -1, calcPos = null;
+function toggleCalc(open) {
+  const el = $('#calc'); el.hidden = open === undefined ? !el.hidden : !open;
+  if (!el.hidden) { drawCalc(); if (!coarsePtr.matches) $('#cin')?.focus(); }
+  renderSide(...sideArgs);
+}
+function drawCalc() {
+  const C = CS(), el = $('#calc'), tabs = [['calc', 'Calculate'], ['eqn', 'Equation'], ['stat', 'Stats'], ['table', 'Table']];
+  el.innerHTML = `<header title="Drag to move"><span class="hico" style="width:30px;height:30px;border-radius:8px">${icon('calc', 16)}</span><div class="seg">${tabs.map(([k, t]) => `<button data-tab="${k}"${C.tab === k ? ' class="on"' : ''}>${t}</button>`).join('')}</div><span style="flex:1"></span><button id="calcX" title="Close (Esc)">×</button></header><div class="cpane" id="cpane"></div>`;
+  if (calcPos) Object.assign(el.style, { left: calcPos[0] + 'px', top: calcPos[1] + 'px', right: 'auto' });
+  el.querySelector('.seg').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) { C.tab = b.dataset.tab; save(); drawCalc(); } };
+  $('#calcX').onclick = () => toggleCalc(false);
+  const hd = el.querySelector('header'); // drag the panel by its header
+  hd.onpointerdown = e => {
+    if (e.target.closest('button')) return; e.preventDefault(); hd.setPointerCapture(e.pointerId);
+    const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    hd.onpointermove = m => { calcPos = [Math.max(0, Math.min(innerWidth - r.width, m.clientX - dx)), Math.max(0, Math.min(innerHeight - 60, m.clientY - dy))]; Object.assign(el.style, { left: calcPos[0] + 'px', top: calcPos[1] + 'px', right: 'auto' }); };
+    hd.onpointerup = () => hd.onpointermove = hd.onpointerup = null;
+  };
+  ({ eqn: calcEqn, stat: calcStat, table: calcTable }[C.tab] || calcMain)($('#cpane'), C);
+}
+function calcMain(pane, C) {
+  pane.innerHTML = `<div class="cdisp"><input id="cin" spellcheck="false" autocomplete="off" placeholder="e.g. 2sin(30) + √(16)"${coarsePtr.matches ? ' inputmode="none"' : ''}><div class="cres" id="cres"></div></div>
+    <div class="cmeta"><div class="seg" id="cang">${[['deg', 'DEG'], ['rad', 'RAD'], ['gra', 'GRA']].map(([k, t]) => `<button data-a="${k}"${C.ang === k ? ' class="on"' : ''} title="Angles in ${{ deg: 'degrees', rad: 'radians', gra: 'grads' }[k]}">${t}</button>`).join('')}</div><button id="csd" title="Fraction ⇔ decimal (S⇔D)">S⇔D</button><span style="flex:1"></span><button id="cins" title="Add the last calculation to the open page">${icon('noteplus', 14)} Insert</button></div>
+    <div class="ckeys">${CKEYS.map(([l, , c, t], i) => `<button data-i="${i}"${c ? ` class="${c}"` : ''}${t ? ` title="${t}"` : ''}>${l}</button>`).join('')}</div>
+    <div class="chist" id="chist"></div>`;
+  const cin = $('#cin'), cres = $('#cres'), keys = pane.querySelector('.ckeys');
+  const show = (v, err) => { cres.classList.toggle('err', !!err); cres.textContent = err || (v == null ? '' : calcDec || !calcFrac(v) ? calcFmt(v) : calcFrac(v)); };
+  const hist = () => $('#chist').innerHTML = C.hist.map((h, i) => `<div data-h="${i}" title="Use again"><span>${esc(h.i)}</span><span>= ${esc(calcShow(h.v))}</span></div>`).join('') || '<small style="padding:4px 6px;display:block">Your calculations appear here.</small>';
+  const run = () => {
+    const src = cin.value.trim(); if (!src) return;
+    try { const v = calcEval(src); C.ans = v; C.hist.unshift({ i: src, v }); C.hist.splice(40); calcDec = false; calcJust = true; calcHi = -1; save(); show(v); hist(); }
+    catch (e) { if (!e.calc) console.error(e); show(null, e.calc ? e.message : 'Syntax ERROR'); }
+  };
+  const del = () => {
+    let s = cin.selectionStart, en = cin.selectionEnd;
+    if (s === en) { const m = /(?:(?:a?(?:sin|cos|tan)h?|sqrt|cbrt|abs|exp|log|ln|nCr|nPr|d\/dx)\(|×10\^\(|10\^\(|e\^\(|[√∛∫Σ]\(|Ans|⁻¹)$/.exec(cin.value.slice(0, s)); s -= m ? m[0].length : 1; if (s < 0) return; }
+    cin.setRangeText('', s, en, 'end');
+  };
+  const press = k => {
+    if (k === 'eq') return run();
+    if (k === 'ac') { cin.value = ''; show(null); calcJust = false; return; }
+    if (calcJust && k !== 'del') { cin.value = /^[-+×÷^²³⁻!%→]/.test(k) ? 'Ans' : ''; cin.setSelectionRange(cin.value.length, cin.value.length); }
+    calcJust = false;
+    if (k === 'del') del(); else cin.setRangeText(k, cin.selectionStart, cin.selectionEnd, 'end');
+    if (!coarsePtr.matches) cin.focus();
+  };
+  keys.onpointerdown = e => { if (e.target.closest('button')) e.preventDefault(); }; // keep the caret in the input
+  keys.onclick = e => { const b = e.target.closest('button'); if (b) press(CKEYS[b.dataset.i][1]); };
+  cin.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); return run(); }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); calcHi = Math.max(-1, Math.min(C.hist.length - 1, calcHi + (e.key === 'ArrowUp' ? 1 : -1))); cin.value = calcHi < 0 ? '' : C.hist[calcHi].i; calcJust = false; return; }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+    const k = { '*': '×', '/': '÷' }[e.key]; if (calcJust || k) { e.preventDefault(); press(k || e.key); }
+  };
+  cin.oninput = () => calcJust = false;
+  $('#cang').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; C.ang = b.dataset.a; save(); pane.querySelectorAll('#cang button').forEach(x => x.classList.toggle('on', x === b)); };
+  $('#csd').onclick = () => { if (!C.hist[0]) return; calcDec = !calcDec; show(C.hist[0].v); };
+  $('#cins').onclick = () => {
+    const h = C.hist[0]; if (!h) return toast('Calculate something first');
+    if (!insertIntoNote) return toast('Open a page to insert into it');
+    insertIntoNote(`${h.i} = ${calcShow(h.v)}`); toast('Added to the page');
+  };
+  $('#chist').onclick = e => { const d = e.target.closest('[data-h]'); if (!d) return; const h = C.hist[+d.dataset.h]; cin.value = h.i; calcJust = false; show(h.v); if (!coarsePtr.matches) cin.focus(); };
+  hist(); if (C.hist[0]) { cin.value = C.hist[0].i; calcJust = true; show(C.hist[0].v); }
+}
+const EQNS = { quad: ['aX² + bX + c = 0', ['a', 'b', 'c']], cubic: ['aX³ + bX² + cX + d = 0', ['a', 'b', 'c', 'd']], lin2: ['2 unknowns · aX + bY = c', 2], lin3: ['3 unknowns · aX + bY + cZ = d', 3], solve: ['Solve for X · f(X) = g(X)'] };
+function calcEqn(pane, C) {
+  const Q = C.eq, [, spec] = EQNS[Q.t], val = k => Q.v[Q.t + k] ?? '';
+  const inp = (k, ph = '0') => `<input data-k="${k}" value="${esc(val(k))}" placeholder="${ph}">`;
+  let body;
+  if (Array.isArray(spec)) body = `<div class="cgrid" style="grid-template-columns:repeat(${spec.length},1fr)">${spec.map(l => `<small style="text-align:center">${l}</small>`).join('')}${spec.map(l => inp(l)).join('')}</div>`;
+  else if (spec) { const L = 'abcd'.slice(0, spec + 1).split(''); body = `<div class="cgrid" style="grid-template-columns:repeat(${L.length},1fr)">${L.map(l => `<small style="text-align:center">${l}</small>`).join('')}${Array.from({ length: spec }, (_, r) => L.map(l => inp(l + r)).join('')).join('')}</div>`; }
+  else body = `<input data-k="f" value="${esc(val('f'))}" placeholder="e.g. X² = 2   or   cos(X) = X"><div class="row"><small>Start from X =</small><input data-k="x0" value="${esc(val('x0'))}" placeholder="1" style="width:90px;flex:none"></div>`;
+  pane.innerHTML = `<div class="cform"><select id="eqt">${Object.entries(EQNS).map(([k, [t]]) => `<option value="${k}"${k === Q.t ? ' selected' : ''}>${t}</option>`).join('')}</select>${body}
+    <small>Fields take expressions too, e.g. 1/3, √2, π, A.</small><button class="pri" id="eqgo">Solve</button><div class="cout" id="eqout"></div></div>`;
+  $('#eqt').onchange = e => { Q.t = e.target.value; save(); calcEqn(pane, C); };
+  pane.querySelectorAll('[data-k]').forEach(i => i.oninput = () => { Q.v[Q.t + i.dataset.k] = i.value; save(); });
+  pane.querySelectorAll('[data-k]').forEach(i => i.onkeydown = e => { if (e.key === 'Enter') $('#eqgo').click(); });
+  $('#eqgo').onclick = () => {
+    const out = $('#eqout'), num = k => { const s = val(k).trim(); return s ? calcEval(s) : 0; };
+    try { out.textContent = solveEqn(Q.t, num); out.style.color = ''; }
+    catch (e) { if (!e.calc) console.error(e); out.textContent = e.calc ? e.message : 'Syntax ERROR'; out.style.color = '#ff8a8a'; }
+  };
+}
+function solveEqn(t, num) {
+  if (t === 'quad') {
+    const [a, b, c] = ['a', 'b', 'c'].map(num); if (!a) throw CalcErr('a must not be 0');
+    const D = b * b - 4 * a * c, vx = -b / (2 * a), vy = c - b * b / (4 * a), turn = `\n${a > 0 ? 'Minimum' : 'Maximum'} at X = ${calcShow(vx)}, Y = ${calcShow(vy)}`;
+    if (Math.abs(D) < 1e-14 * Math.max(1, b * b)) return `X = ${calcShow(vx)}` + turn;
+    if (D > 0) { const q = -(b + Math.sign(b || 1) * Math.sqrt(D)) / 2; return `X₁ = ${calcShow(q / a)}\nX₂ = ${calcShow(c / q)}` + turn; }
+    const im = Math.sqrt(-D) / (2 * Math.abs(a)); return `X₁ = ${calcCx(vx, im)}\nX₂ = ${calcCx(vx, -im)}` + turn;
+  }
+  if (t === 'cubic') {
+    const k = ['a', 'b', 'c', 'd'].map(num); if (!k[0]) throw CalcErr('a must not be 0');
+    const p = k.map(x => x / k[0]); // monic; Durand–Kerner on complex numbers [re, im]
+    const mul = (x, y) => [x[0] * y[0] - x[1] * y[1], x[0] * y[1] + x[1] * y[0]], sub = (x, y) => [x[0] - y[0], x[1] - y[1]];
+    const div = (x, y) => { const d = y[0] * y[0] + y[1] * y[1]; return [(x[0] * y[0] + x[1] * y[1]) / d, (x[1] * y[0] - x[0] * y[1]) / d]; };
+    const P = z => [[1, 0], [p[1], 0], [p[2], 0], [p[3], 0]].reduce((acc, c) => [mul(acc, z)[0] + c[0], mul(acc, z)[1] + c[1]], [0, 0]);
+    let r = [[1, 0], [.4, .9], mul([.4, .9], [.4, .9])];
+    for (let it = 0; it < 500; it++) r = r.map((z, i) => sub(z, div(P(z), r.reduce((q, w, j) => i === j ? q : mul(q, sub(z, w)), [1, 0]))));
+    r = r.map(([re, im]) => { if (Math.abs(im) > 1e-7 * Math.max(1, Math.abs(re))) return [re, im]; let x = re; for (let i = 0; i < 20; i++) { const f = ((x + p[1]) * x + p[2]) * x + p[3], d = (3 * x + 2 * p[1]) * x + p[2]; if (!d) break; x -= f / d; } return [x, 0]; });
+    r.sort((u, v) => Math.abs(u[1]) - Math.abs(v[1]) || v[0] - u[0]);
+    return r.map(([re, im], i) => `X${'₁₂₃'[i]} = ${calcCx(re, im)}`).join('\n');
+  }
+  if (t === 'lin2' || t === 'lin3') {
+    const n = t === 'lin2' ? 2 : 3, L = 'abcd'.slice(0, n + 1).split(''), M = Array.from({ length: n }, (_, r) => L.map(l => num(l + r)));
+    for (let c = 0; c < n; c++) { // Gaussian elimination, partial pivoting
+      const piv = M.slice(c).reduce((b, row, i) => Math.abs(row[c]) > Math.abs(M[b][c]) ? c + i : b, c); [M[c], M[piv]] = [M[piv], M[c]];
+      if (Math.abs(M[c][c]) < 1e-12) throw CalcErr('No unique solution');
+      for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; M[r] = M[r].map((v, j) => v - f * M[c][j]); }
+    }
+    return M.map((row, i) => `${'XYZ'[i]} = ${calcShow(row[n] / row[i])}`).join('\n');
+  }
+  const src = (CS().eq.v.solvef ?? '').trim(); if (!src) throw CalcErr('Type an equation in X');
+  const [l, r = '0'] = src.split('='), fl = calcParse(l), fr = calcParse(r), env = { vars: CS().vars, ans: CS().ans };
+  const F = x => fl({ ...env, X: x }) - fr({ ...env, X: x });
+  let x = num('x0') || 1, ok = false;
+  for (let i = 0; i < 100 && Number.isFinite(x); i++) { const f = F(x), h = 1e-6 * Math.max(1, Math.abs(x)), d = (F(x + h) - F(x - h)) / (2 * h); if (Math.abs(f) < 1e-13) { ok = true; break; } if (!d || !Number.isFinite(d)) break; const nx = x - f / d; if (Math.abs(nx - x) < 1e-14 * Math.max(1, Math.abs(x))) { x = nx; ok = true; break; } x = nx; }
+  if (!ok || !Number.isFinite(x)) { // look outward from the start for a sign change, then bisect
+    const x0 = num('x0') || 1; let lo = null, hi = null;
+    for (let s = .25; s < 2e6 && lo == null; s *= 1.5) for (const [u, v] of [[x0, x0 + s], [x0 - s, x0]]) { const a = F(u), b = F(v); if (Number.isFinite(a) && Number.isFinite(b) && a * b <= 0) { lo = u; hi = v; break; } }
+    if (lo == null) throw CalcErr("Can't solve — try another start value");
+    for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; F(lo) * F(m) <= 0 ? hi = m : lo = m; } x = (lo + hi) / 2;
+  }
+  return `X = ${calcShow(x)}\nL − R = ${calcFmt(F(x))}`;
+}
+function calcStat(pane, C) {
+  pane.innerHTML = `<div class="cform"><textarea id="stin" rows="7" placeholder="One value per line&#10;— or x, y pairs (e.g. 1, 2.5) for regression">${esc(C.stat)}</textarea><div id="stout"></div></div>`;
+  const draw = () => {
+    const out = $('#stout'), rows = C.stat.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!rows.length) return out.innerHTML = '<small>Statistics update as you type.</small>';
+    try {
+      const pts = rows.map(l => l.split(/[,;\t]|\s+(?=[-+.\d])/).map(s => s.trim()).filter(Boolean).map(s => calcEval(s))), pair = pts.every(p => p.length === 2);
+      if (!pair && pts.some(p => p.length !== 1)) throw CalcErr('Use one value per line, or x, y on every line');
+      const xs = pts.map(p => p[0]), ys = pair ? pts.map(p => p[1]) : null, n = xs.length, S1 = a => a.reduce((s, v) => s + v, 0), mean = a => S1(a) / n;
+      const ss = a => { const m = mean(a); return S1(a.map(v => (v - m) ** 2)); }, med = a => { const k = a.length; return k % 2 ? a[(k - 1) / 2] : (a[k / 2 - 1] + a[k / 2]) / 2; };
+      const sorted = [...xs].sort((a, b) => a - b), half = Math.floor(n / 2);
+      const R = [['n', n], ['x̄  (mean)', mean(xs)], ['Σx', S1(xs)], ['Σx²', S1(xs.map(v => v * v))], ['σx  (population)', Math.sqrt(ss(xs) / n)], ['sx  (sample)', n > 1 ? Math.sqrt(ss(xs) / (n - 1)) : NaN],
+        ['min', sorted[0]], ...(n > 1 ? [['Q1', med(sorted.slice(0, half))]] : []), ['median', med(sorted)], ...(n > 1 ? [['Q3', med(sorted.slice(n - half))]] : []), ['max', sorted[n - 1]]];
+      if (pair) {
+        const mx = mean(xs), my = mean(ys), sxy = S1(xs.map((x, i) => (x - mx) * (ys[i] - my))), sxx = ss(xs), syy = ss(ys), b = sxy / sxx;
+        R.push(['ȳ', my], ['Σy', S1(ys)], ['σy', Math.sqrt(syy / n)], ['sy', n > 1 ? Math.sqrt(syy / (n - 1)) : NaN], ['Σxy', S1(xs.map((x, i) => x * ys[i]))], ['y = a + bx  ·  a', my - b * mx], ['b', b], ['r', sxy / Math.sqrt(sxx * syy)]);
+      }
+      out.innerHTML = `<table class="ctab">${R.map(([k, v]) => `<tr><th style="text-align:left">${k}</th><td>${Number.isFinite(v) ? esc(calcFmt(v)) : '—'}</td></tr>`).join('')}</table>`;
+    } catch (e) { out.innerHTML = `<div class="cout" style="color:#ff8a8a">${esc(e.calc ? e.message : 'Syntax ERROR')}</div>`; }
+  };
+  $('#stin').oninput = e => { C.stat = e.target.value; save(); draw(); };
+  draw();
+}
+function calcTable(pane, C) {
+  const T = C.tbl;
+  pane.innerHTML = `<div class="cform"><div class="row"><b>f(X) =</b><input data-k="f" value="${esc(T.f)}" placeholder="e.g. X² − 2X"></div>
+    <div class="row"><small>Start</small><input data-k="a" value="${esc(T.a)}"><small>End</small><input data-k="b" value="${esc(T.b)}"><small>Step</small><input data-k="s" value="${esc(T.s)}"></div><div id="tbout"></div></div>`;
+  const draw = () => {
+    const out = $('#tbout');
+    try {
+      const f = calcParse(T.f), a = calcEval(T.a), b = calcEval(T.b), s = calcEval(T.s); if (s <= 0 || b < a) throw CalcErr('Use Start ≤ End and a positive Step');
+      const n = Math.floor((b - a) / s + 1e-9) + 1; if (n > 200) throw CalcErr('Too many rows — use a bigger step (max 200)');
+      out.innerHTML = `<table class="ctab"><tr><th>X</th><th>f(X)</th></tr>${Array.from({ length: n }, (_, i) => { const x = +(a + i * s).toPrecision(12), y = f({ vars: C.vars, ans: C.ans, X: x }); return `<tr><td>${esc(calcFmt(x))}</td><td>${Number.isFinite(y) ? esc(calcShow(y)) : 'ERROR'}</td></tr>`; }).join('')}</table>`;
+    } catch (e) { out.innerHTML = `<div class="cout" style="color:#ff8a8a">${esc(e.calc ? e.message : 'Syntax ERROR')}</div>`; }
+  };
+  pane.querySelectorAll('[data-k]').forEach(i => i.oninput = () => { T[i.dataset.k] = i.value; save(); draw(); });
+  draw();
+}
 
 /* ---------- AI assistant ---------- */
 const aiLog = [];

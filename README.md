@@ -17,6 +17,7 @@
 - **Whiteboards:** an infinite canvas with pen, highlighter, lasso select, sticky notes, text, images and PNG export.
 - **Files:** PDFs you can write on and add sticky notes to, Markdown files, and **PowerPoint (.pptx) editing**.
 - **Home:** a dashboard of widgets (notes, calendar, tasks, scratch pad, focus timer, habits, formula sheet, ink pad…) that you can drag, collapse and customise.
+- **Scientific calculator** in a side panel, with fx-991-style features: trig, logs, powers, fractions, memories, ∫, d/dx, Σ, an equation solver (quadratic, cubic, 2 and 3 unknowns), statistics and regression, and tables. Results can be inserted into a page.
 - **Tasks and calendar**, plus **password-protected sections** that are encrypted on your device.
 - **Keyboard shortcuts** for almost everything. Press **F1** in the app to see them all.
 
