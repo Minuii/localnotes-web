@@ -454,6 +454,12 @@ dialog form{display:grid;gap:10px}
 .cres.err{color:#ff8a8a;font-size:15px;padding-top:8px}
 .cmeta{display:flex;gap:6px;align-items:center;padding:0 12px 4px}
 .cmeta .seg{height:28px}.cmeta .seg button{font-size:11px;padding:0 8px;min-width:0}.cmeta>button{height:28px;padding:0 9px;font-size:12px}
+.cfindw{position:relative;padding:2px 12px 4px}
+.cfindw input{width:100%;font-size:13px}
+.cpick{position:absolute;left:12px;right:12px;top:calc(100% - 2px);max-height:260px;overflow:auto;background:var(--panel);border:1px solid #444;border-radius:10px;z-index:2;box-shadow:0 10px 30px #000c;padding:4px}
+.cpick div{display:flex;flex-direction:column;padding:6px 9px;border-radius:7px;cursor:pointer}
+.cpick div b{font-weight:600;font-size:13px}.cpick div span{font-size:11px;color:var(--mut)}
+.cpick div.on,.cpick div:hover{background:var(--panel2)}
 .ckeys{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;padding:6px 12px 10px}
 .ckeys button{height:34px;padding:0;justify-content:center;font-size:13px;background:#262626;border-color:#333;border-radius:8px;color:#d6d6d6}
 .ckeys button:hover{background:#303030}
@@ -2614,7 +2620,7 @@ function viewSettings(section) {
 
 /* ---------- keyboard shortcuts (Windows) ---------- */
 const SHORTCUTS = [
-  ['Calculator', [['Ctrl+Shift+C', 'Open / close the calculator'], ['Enter', 'Calculate'], ['↑ / ↓', 'Earlier calculations'], ['5+3→A', 'Store in a memory (A–F, M, X, Y)'], ['∫(X², 0, 1)', 'Integral · also d/dx(…, x) and Σ(…, a, b)']]],
+  ['Calculator', [['Ctrl+Shift+C', 'Open / close the calculator'], ['Enter', 'Calculate'], ['↑ / ↓', 'Earlier calculations'], ['5+3→A', 'Store in a memory (A–F, M, X, Y)'], ['∫(X², 0, 1)', 'Integral · also d/dx(…, x) and Σ(…, a, b)'], ['5 [cm▸in]  /  [c0]', 'Unit conversion / constant (search box in the calculator)']]],
   ['General', [['Ctrl+N', 'New page'], ['Ctrl+Alt+N', 'New page below the current one'], ['Ctrl+T', 'New section'], ['Ctrl+Shift+N', 'New notebook'], ['Ctrl+F  /  Ctrl+E', 'Search'], ['Ctrl+J', 'AI assistant'], ['Ctrl+\\', 'Collapse / expand sidebar'], ['Ctrl+,', 'Settings'], ['F1  /  Ctrl+/', 'This shortcuts panel'], ['Ctrl+S', 'Save (everything saves automatically)'], ['Esc', 'Close panels and menus']]],
   ['Go to', [['Alt+1', 'Home'], ['Alt+2', 'Notes'], ['Alt+3', 'Tasks'], ['Alt+4', 'Files'], ['Alt+5', 'Calendar'], ['Alt+6', 'Whiteboards']]],
   ['Writing', [['Ctrl+B / I / U', 'Bold / italic / underline'], ['Ctrl+Alt+1 / 2 / 3', 'Heading 1 / 2 / 3'], ['Ctrl+Alt+0', 'Normal text'], ['Ctrl+.', 'Bulleted list'], ['Ctrl+/', 'Numbered list (in a page)'], ['Ctrl+K', 'Insert link'], ['Ctrl+click', 'Open link'], ['Alt+Shift+D / T / F', 'Insert date / time / both']]],
@@ -2663,11 +2669,38 @@ document.addEventListener('keydown', e => {
 const CS = () => S.settings.calc ||= { ang: 'deg', vars: {}, hist: [], ans: 0, tab: 'calc', eq: { t: 'quad', v: {} }, stat: '', tbl: { f: 'X²', a: '1', b: '5', s: '1' } };
 const CalcErr = (m = 'Syntax ERROR') => Object.assign(new Error(m), { calc: true });
 const CFUNCS = ['asinh', 'acosh', 'atanh', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'sqrt', 'cbrt', 'abs', 'exp', 'log', 'ln', 'nCr', 'nPr', 'ddx', 'int', 'sum'];
+// the fx's 40 scientific constants (CODATA 2018) and 40 metric conversions (NIST SP 811), written [name] and [from▸to] in expressions
+const CCONST = [['mp', 'proton mass', 1.67262192369e-27, 'kg'], ['mn', 'neutron mass', 1.67492749804e-27, 'kg'], ['me', 'electron mass', 9.1093837015e-31, 'kg'], ['mμ', 'muon mass', 1.883531627e-28, 'kg'],
+  ['a0', 'Bohr radius', 5.29177210903e-11, 'm'], ['h', 'Planck constant', 6.62607015e-34, 'J s'], ['μN', 'nuclear magneton', 5.0507837461e-27, 'J/T'], ['μB', 'Bohr magneton', 9.2740100783e-24, 'J/T'],
+  ['ħ', 'Planck constant, rationalized', 1.054571817e-34, 'J s'], ['α', 'fine-structure constant', 7.2973525693e-3, ''], ['re', 'classical electron radius', 2.8179403262e-15, 'm'], ['λC', 'Compton wavelength', 2.42631023867e-12, 'm'],
+  ['γp', 'proton gyromagnetic ratio', 2.6752218744e8, '1/(s T)'], ['λCp', 'proton Compton wavelength', 1.32140985539e-15, 'm'], ['λCn', 'neutron Compton wavelength', 1.31959090581e-15, 'm'], ['R∞', 'Rydberg constant', 10973731.56816, '1/m'],
+  ['u', 'atomic mass unit', 1.6605390666e-27, 'kg'], ['μp', 'proton magnetic moment', 1.41060679736e-26, 'J/T'], ['μe', 'electron magnetic moment', -9.2847647043e-24, 'J/T'], ['μn', 'neutron magnetic moment', -9.6623651e-27, 'J/T'],
+  ['μμ', 'muon magnetic moment', -4.4904483e-26, 'J/T'], ['F', 'Faraday constant', 96485.33212, 'C/mol'], ['e', 'elementary charge', 1.602176634e-19, 'C'], ['NA', 'Avogadro constant', 6.02214076e23, '1/mol'],
+  ['k', 'Boltzmann constant', 1.380649e-23, 'J/K'], ['Vm', 'molar volume of ideal gas (273.15 K, 100 kPa)', 22.71095464e-3, 'm³/mol'], ['R', 'molar gas constant', 8.314462618, 'J/(mol K)'], ['c0', 'speed of light in vacuum', 299792458, 'm/s'],
+  ['c1', 'first radiation constant', 3.741771852e-16, 'W m²'], ['c2', 'second radiation constant', 1.438776877e-2, 'm K'], ['σ', 'Stefan–Boltzmann constant', 5.670374419e-8, 'W/(m² K⁴)'], ['ε0', 'electric constant', 8.8541878128e-12, 'F/m'],
+  ['μ0', 'magnetic constant', 1.25663706212e-6, 'N/A²'], ['Φ0', 'magnetic flux quantum', 2.067833848e-15, 'Wb'], ['g', 'standard acceleration of gravity', 9.80665, 'm/s²'], ['G0', 'conductance quantum', 7.748091729e-5, 'S'],
+  ['Z0', 'characteristic impedance of vacuum', 376.730313668, 'Ω'], ['t', 'Celsius temperature (0 °C)', 273.15, 'K'], ['G', 'Newtonian constant of gravitation', 6.6743e-11, 'm³/(kg s²)'], ['atm', 'standard atmosphere', 101325, 'Pa']];
+const CCONV = [];
+[['in', 'cm', 2.54], ['ft', 'm', .3048], ['yd', 'm', .9144], ['mile', 'km', 1.609344], ['nmile', 'm', 1852], ['acre', 'm²', 4046.8564224], ['gal(US)', 'ℓ', 3.785411784], ['gal(UK)', 'ℓ', 4.54609],
+  ['pc', 'km', 3.0856775814913673e13], ['km/h', 'm/s', 1 / 3.6], ['oz', 'g', 28.349523125], ['lb', 'kg', .45359237], ['atm', 'Pa', 101325], ['mmHg', 'Pa', 133.322387415], ['hp', 'kW', .745699872],
+  ['kgf/cm²', 'Pa', 98066.5], ['kgf·m', 'J', 9.80665], ['lbf/in²', 'kPa', 6.894757293168], ['°F', '°C'], ['J', 'cal', 1 / 4.1855]]
+  .forEach(([a, b, k]) => CCONV.push(...(k ? [[`${a}▸${b}`, v => v * k], [`${b}▸${a}`, v => v / k]] : [[`${a}▸${b}`, v => (v - 32) * 5 / 9], [`${b}▸${a}`, v => v * 9 / 5 + 32]])));
+const CUNIT = { in: 'inch inches', cm: 'centimetre centimeter', ft: 'foot feet', m: 'metre meter', yd: 'yard yards', mile: 'mile miles', km: 'kilometre kilometer', nmile: 'nautical-mile nautical mile', acre: 'acre area', 'm²': 'm² square metre meter area m2',
+  'gal(US)': 'gallon us volume', 'gal(UK)': 'gallon uk imperial volume', 'ℓ': 'litre liter l volume', pc: 'parsecs parsec astronomy', 'km/h': 'km/h kmh kph speed', 'm/s': 'm/s speed', oz: 'ounce ounces weight mass', g: 'gram grams weight mass',
+  lb: 'pound pounds lbs weight mass', kg: 'kilogram kilo weight mass', atm: 'atmosphere pressure', Pa: 'pascal pressure', mmHg: 'mmHg millimetre mercury torr pressure', hp: 'horsepower power', kW: 'kilowatt power',
+  'kgf/cm²': 'kgf/cm² kilogram force pressure', 'kgf·m': 'kgf·m kilogram force metre energy torque', J: 'joule energy', 'lbf/in²': 'psi pound force pressure', kPa: 'kilopascal pressure', '°F': 'fahrenheit temperature', '°C': 'celsius centigrade temperature', cal: 'calorie energy' };
+let CPICK; const cpickList = () => CPICK ||= [...CCONST.map(([s, n, v, u], i) => ({ label: s, ins: `[${s}]`, desc: `${n} · ${calcFmt(v)}${u ? ' ' + u : ''}`, find: `const constant ${i + 1} ${s} ${n} ${u}`.toLowerCase() })),
+  ...CCONV.map(([n], i) => { const [a, b] = n.split('▸'); return { label: n.replace('▸', ' ▸ '), ins: `[${n}]`, desc: `convert ${CUNIT[a]?.split(' ')[0] || a} to ${CUNIT[b]?.split(' ')[0] || b} — put it after a number`, find: `conv convert ${i + 1} ${n} ${a} ${b} to ${CUNIT[a] || ''} ${CUNIT[b] || ''}`.toLowerCase() }; })];
 function calcTokens(src) {
   const s = src.replace(/d\/dx/g, 'ddx').replace(/->/g, '→').replace(/∫/g, 'int').replace(/Σ/g, 'sum').replace(/\s+/g, ''), t = [];
   for (let i = 0; i < s.length;) {
     const rest = s.slice(i), c = s[i], num = /^(\d+\.?\d*|\.\d+)/.exec(rest), fn = CFUNCS.find(n => rest.startsWith(n));
-    if (num) { t.push({ k: 'num', v: parseFloat(num[1]) }); i += num[1].length; }
+    if (c === '[') { // [c0] constant or [cm▸in] conversion
+      const j = s.indexOf(']', i), name = j < 0 ? '' : s.slice(i + 1, j), k = CCONST.find(x => x[0] === name), cv = CCONV.find(x => x[0].replace(/\s/g, '') === name);
+      if (k) t.push({ k: 'num', v: k[2] }); else if (cv) t.push({ k: 'op', v: 'conv', f: cv[1] }); else throw CalcErr();
+      i = j + 1;
+    }
+    else if (num) { t.push({ k: 'num', v: parseFloat(num[1]) }); i += num[1].length; }
     else if (rest.startsWith('⁻¹')) { t.push({ k: 'op', v: 'inv' }); i += 2; }
     else if (fn) { t.push({ k: 'fn', v: fn }); i += fn.length; }
     else if (rest.startsWith('Ans')) { t.push({ k: 'ans' }); i += 3; }
@@ -2718,7 +2751,7 @@ function calcParse(src) { // -> env => number   (env: { vars, ans, X? })
   const prod = () => { let a = unary(); for (;;) { const x = a; if (eat('×')) { const y = unary(); a = e => x(e) * y(e); } else if (eat('÷')) { const y = unary(); a = e => x(e) / y(e); } else if (starts(t[p])) { const y = power(); a = e => x(e) * y(e); } else return a; } }; // 2π, 3(4), 2sin30
   const unary = () => eat('-') ? (f => e => -f(e))(unary()) : eat('+') ? unary() : power();
   const power = () => { const b = post(); if (!eat('^')) return b; const x = unary(); return e => b(e) ** x(e); };
-  const post = () => { let a = prim(); for (;;) { const x = a; if (eat('!')) a = e => cFact(x(e)); else if (eat('²')) a = e => x(e) ** 2; else if (eat('³')) a = e => x(e) ** 3; else if (eat('inv')) a = e => 1 / x(e); else if (eat('%')) a = e => x(e) / 100; else return a; } };
+  const post = () => { let a = prim(); for (;;) { const x = a; if (eat('!')) a = e => cFact(x(e)); else if (eat('²')) a = e => x(e) ** 2; else if (eat('³')) a = e => x(e) ** 3; else if (eat('inv')) a = e => 1 / x(e); else if (eat('%')) a = e => x(e) / 100; else if (is('conv')) { const cv = t[p++].f; a = e => cv(x(e)); } else return a; } };
   const group = () => { const f = expr(); close(); return f; };
   const prim = () => {
     const x = t[p++]; if (!x) throw CalcErr();
@@ -2744,7 +2777,7 @@ function calcFrac(v) { // "p/q" when v is (to 12 digits) a simple fraction
   let h0 = 1, h1 = 0, k0 = 0, k1 = 1, x = v;
   for (let i = 0; i < 30; i++) {
     const a = Math.floor(x); [h0, h1] = [a * h0 + h1, h0]; [k0, k1] = [a * k0 + k1, k0];
-    if (k0 > 1e5) return null;
+    if (k0 > 1e4) return null;
     if (Math.abs(v - h0 / k0) < 1e-12 * Math.max(1, Math.abs(v))) return k0 === 1 ? null : `${h0}/${k0}`;
     x = 1 / (x - a); if (!Number.isFinite(x)) return null;
   }
@@ -2787,11 +2820,12 @@ function drawCalc() {
 function calcMain(pane, C) {
   pane.innerHTML = `<div class="cdisp"><input id="cin" spellcheck="false" autocomplete="off" placeholder="e.g. 2sin(30) + √(16)"${coarsePtr.matches ? ' inputmode="none"' : ''}><div class="cres" id="cres"></div></div>
     <div class="cmeta"><div class="seg" id="cang">${[['deg', 'DEG'], ['rad', 'RAD'], ['gra', 'GRA']].map(([k, t]) => `<button data-a="${k}"${C.ang === k ? ' class="on"' : ''} title="Angles in ${{ deg: 'degrees', rad: 'radians', gra: 'grads' }[k]}">${t}</button>`).join('')}</div><button id="csd" title="Fraction ⇔ decimal (S⇔D)">S⇔D</button><span style="flex:1"></span><button id="cins" title="Add the last calculation to the open page">${icon('noteplus', 14)} Insert</button></div>
+    <div class="cfindw"><input id="cfind" placeholder="Search constants & conversions — e.g. light, inch, °F" autocomplete="off" spellcheck="false"><div class="cpick" id="cpick" hidden></div></div>
     <div class="ckeys">${CKEYS.map(([l, , c, t], i) => `<button data-i="${i}"${c ? ` class="${c}"` : ''}${t ? ` title="${t}"` : ''}>${l}</button>`).join('')}</div>
     <div class="chist" id="chist"></div>`;
   const cin = $('#cin'), cres = $('#cres'), keys = pane.querySelector('.ckeys');
-  const show = (v, err) => { cres.classList.toggle('err', !!err); cres.textContent = err || (v == null ? '' : calcDec || !calcFrac(v) ? calcFmt(v) : calcFrac(v)); };
-  const hist = () => $('#chist').innerHTML = C.hist.map((h, i) => `<div data-h="${i}" title="Use again"><span>${esc(h.i)}</span><span>= ${esc(calcShow(h.v))}</span></div>`).join('') || '<small style="padding:4px 6px;display:block">Your calculations appear here.</small>';
+  const show = (v, err, src = cin.value) => { cres.classList.toggle('err', !!err); cres.textContent = err || (v == null ? '' : calcDec !== src.includes('[') || !calcFrac(v) ? calcFmt(v) : calcFrac(v)); }; // constants and conversions read better as decimals
+  const hist = () => $('#chist').innerHTML = C.hist.map((h, i) => `<div data-h="${i}" title="Use again"><span>${esc(h.i)}</span><span>= ${esc(h.i.includes('[') ? calcFmt(h.v) : calcShow(h.v))}</span></div>`).join('') || '<small style="padding:4px 6px;display:block">Your calculations appear here.</small>';
   const run = () => {
     const src = cin.value.trim(); if (!src) return;
     try { const v = calcEval(src); C.ans = v; C.hist.unshift({ i: src, v }); C.hist.splice(40); calcDec = false; calcJust = true; calcHi = -1; save(); show(v); hist(); }
@@ -2799,13 +2833,13 @@ function calcMain(pane, C) {
   };
   const del = () => {
     let s = cin.selectionStart, en = cin.selectionEnd;
-    if (s === en) { const m = /(?:(?:a?(?:sin|cos|tan)h?|sqrt|cbrt|abs|exp|log|ln|nCr|nPr|d\/dx)\(|×10\^\(|10\^\(|e\^\(|[√∛∫Σ]\(|Ans|⁻¹)$/.exec(cin.value.slice(0, s)); s -= m ? m[0].length : 1; if (s < 0) return; }
+    if (s === en) { const m = /(?:(?:a?(?:sin|cos|tan)h?|sqrt|cbrt|abs|exp|log|ln|nCr|nPr|d\/dx)\(|×10\^\(|10\^\(|e\^\(|[√∛∫Σ]\(|Ans|⁻¹|\[[^\]]*\])$/.exec(cin.value.slice(0, s)); s -= m ? m[0].length : 1; if (s < 0) return; }
     cin.setRangeText('', s, en, 'end');
   };
   const press = k => {
     if (k === 'eq') return run();
     if (k === 'ac') { cin.value = ''; show(null); calcJust = false; return; }
-    if (calcJust && k !== 'del') { cin.value = /^[-+×÷^²³⁻!%→]/.test(k) ? 'Ans' : ''; cin.setSelectionRange(cin.value.length, cin.value.length); }
+    if (calcJust && k !== 'del') { cin.value = /^([-+×÷^²³⁻!%→]|\[[^\]]*▸)/.test(k) ? 'Ans' : ''; cin.setSelectionRange(cin.value.length, cin.value.length); }
     calcJust = false;
     if (k === 'del') del(); else cin.setRangeText(k, cin.selectionStart, cin.selectionEnd, 'end');
     if (!coarsePtr.matches) cin.focus();
@@ -2819,12 +2853,31 @@ function calcMain(pane, C) {
     const k = { '*': '×', '/': '÷' }[e.key]; if (calcJust || k) { e.preventDefault(); press(k || e.key); }
   };
   cin.oninput = () => calcJust = false;
+  // searchable CONST / CONV list: pick one to insert it at the caret
+  const find = $('#cfind'), pick = $('#cpick'); let hits = [], sel = 0;
+  const drawPick = () => {
+    const q = find.value.trim().toLowerCase(), words = q.split(/\s+/).filter(Boolean);
+    hits = cpickList().filter(x => words.every(w => x.find.includes(w))).sort((a, b) => !!words[0] && b.label.toLowerCase().startsWith(words[0]) - a.label.toLowerCase().startsWith(words[0])).slice(0, 60); sel = Math.min(sel, Math.max(0, hits.length - 1));
+    pick.innerHTML = hits.map((x, i) => `<div data-p="${i}"${i === sel ? ' class="on"' : ''}><b>${esc(x.label)}</b><span>${esc(x.desc)}</span></div>`).join('') || '<small style="padding:8px;display:block">No match.</small>';
+    pick.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  };
+  const choose = i => { const x = hits[i]; if (!x) return; find.value = ''; pick.hidden = true; press(x.ins); if (coarsePtr.matches) find.blur(); };
+  find.onfocus = () => { pick.hidden = false; drawPick(); };
+  find.oninput = () => { sel = 0; pick.hidden = false; drawPick(); };
+  find.onblur = () => setTimeout(() => pick.hidden = true, 150);
+  find.onkeydown = e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, Math.min(hits.length - 1, sel + (e.key === 'ArrowDown' ? 1 : -1))); drawPick(); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(sel); }
+    else if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); find.value = ''; find.blur(); }
+  };
+  pick.onpointerdown = e => e.preventDefault(); // keep focus while choosing
+  pick.onclick = e => { const d = e.target.closest('[data-p]'); if (d) choose(+d.dataset.p); };
   $('#cang').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; C.ang = b.dataset.a; save(); pane.querySelectorAll('#cang button').forEach(x => x.classList.toggle('on', x === b)); };
   $('#csd').onclick = () => { if (!C.hist[0]) return; calcDec = !calcDec; show(C.hist[0].v); };
   $('#cins').onclick = () => {
     const h = C.hist[0]; if (!h) return toast('Calculate something first');
     if (!insertIntoNote) return toast('Open a page to insert into it');
-    insertIntoNote(`${h.i} = ${calcShow(h.v)}`); toast('Added to the page');
+    insertIntoNote(`${h.i} = ${h.i.includes("[") ? calcFmt(h.v) : calcShow(h.v)}`); toast('Added to the page');
   };
   $('#chist').onclick = e => { const d = e.target.closest('[data-h]'); if (!d) return; const h = C.hist[+d.dataset.h]; cin.value = h.i; calcJust = false; show(h.v); if (!coarsePtr.matches) cin.focus(); };
   hist(); if (C.hist[0]) { cin.value = C.hist[0].i; calcJust = true; show(C.hist[0].v); }
