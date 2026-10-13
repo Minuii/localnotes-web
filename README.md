@@ -1,62 +1,83 @@
 # LocalNotes
 
-**A local-first notes app** for notebooks, tasks, a calendar and pen whiteboards, in the style of OneNote and Evernote. Everything stays on your own device: no account, no cloud, no tracking.
+**A local-first notes app** for notebooks, tasks, a calendar, files and pen whiteboards, in the style of OneNote and Evernote. Everything stays on your own device: no account, no cloud, no tracking.
 
-👉 **Open it: https://minuii.github.io/localnotes-web/**
-
-This repository is the **web / iPad version**. It's the same app as the Windows desktop version, packaged as an installable web app that works offline.
+| | Get it |
+|---|---|
+| 🪟 **Windows** | **[Download the latest version](https://github.com/Minuii/localnotes-web/releases/latest)**: the portable `.exe` (no install) or the installer |
+| 📱 **iPad / tablet / any browser** | **[Open the web app](https://minuii.github.io/localnotes-web/)** and install it from the browser (see below) |
 
 ---
 
-## Install on iPad
-
-1. Open **https://minuii.github.io/localnotes-web/** in **Safari**.
-2. Tap **Share** (the square with an arrow) → **Add to Home Screen** → **Add**.
-3. Always open LocalNotes **from the Home Screen icon**. It runs full screen and works without internet.
-
-It also runs in any modern browser on a computer. In Chrome or Edge, use the install icon in the address bar.
-
-## What's inside
+## Features
 
 - **Notebooks, OneNote-style:** coloured sections, pages and subpages, headings as chapter points, a contents and A–Z **Index**, tags with a **Tags summary**, paper styles (ruled, grid, dots) and page colours.
 - **Writing:** headings, lists, to-dos, links, and **LaTeX math** (`$x^2$` inline, `$$…$$` blocks, or Alt+=).
-- **Pen and ink:** write right on pages, PDFs and slides with **Apple Pencil** (pressure-sensitive). Scribble over ink to erase it, and rough circles, lines, boxes and triangles snap clean.
+- **Pen and ink:** write right on pages, PDFs and slides with a stylus (pen tablet, Surface pen or Apple Pencil), with pressure. Scribble over ink to erase it, and rough circles, lines, boxes and triangles snap clean.
 - **Whiteboards:** an infinite canvas with pen, highlighter, lasso select, sticky notes, text, images and PNG export.
 - **Files:** PDFs you can write on and add sticky notes to, Markdown files, and **PowerPoint (.pptx) editing**.
 - **Home:** a dashboard of widgets (notes, calendar, tasks, scratch pad, focus timer, habits, formula sheet, ink pad…) that you can drag, collapse and customise.
-- **Tasks and calendar**, plus **password-protected sections** that are encrypted on the device.
+- **Tasks and calendar**, plus **password-protected sections** that are encrypted on your device.
+- **Keyboard shortcuts** for almost everything. Press **F1** in the app to see them all.
 
-## Using it with touch and Apple Pencil
+## Install
+
+### Windows
+
+1. Go to **[Releases](https://github.com/Minuii/localnotes-web/releases/latest)** and download one of these:
+   - **`LocalNotes-x.y.z-portable.exe`**: no install. Just run it, from anywhere, even a USB stick.
+   - **`LocalNotes-Setup-x.y.z.exe`**: installs LocalNotes with Start menu and desktop shortcuts, and updates itself.
+2. Windows may say **"Windows protected your PC"** because the app isn't code-signed yet. Click **More info → Run anyway**.
+
+When a new version comes out, the app tells you. The installer version downloads it and installs it when you restart. The portable version shows a link to download it.
+
+### iPad
+
+1. Open **https://minuii.github.io/localnotes-web/** in **Safari**.
+2. Tap **Share** (the square with an arrow) → **Add to Home Screen** → **Add**.
+3. Always open LocalNotes **from the Home Screen icon**. It runs full screen and works offline.
+
+### Other devices
+
+Open **https://minuii.github.io/localnotes-web/** in Chrome or Edge, on Android, a Chromebook, a Mac or a PC, and use **Install app** from the browser menu or the address bar. It also works as a normal web page.
+
+## Pen and touch
 
 | Do this | To |
 |---|---|
-| Write with the Pencil | Draw ink (in **✒ Stylus draws** mode, the default) |
+| Write with a stylus | Draw ink (in **✒ Stylus draws** mode, the default) |
 | Drag with one finger | Scroll a page, or pan on a whiteboard |
 | Drag with two fingers | Scroll a page in **✒ Draw (all input)** mode, where one finger draws |
-| Pinch with two fingers | Zoom a whiteboard |
-| Press and hold | Open the menu (like right-click), e.g. on a page or section |
-| Switch to **⌨ Type only** and write with the Pencil | iPadOS **Scribble** turns your handwriting into typed text |
-| Use a keyboard | Shortcuts work with **Cmd** where Windows uses Ctrl |
+| Pinch | Zoom a whiteboard |
+| Press and hold / right-click | Open the menu on a page or section |
+| Ctrl+Shift+D | Switch between ⌨ Type only → ✒ Stylus draws → ✒ Draw with anything |
+
+On iPad, switch to **⌨ Type only** and write with Apple Pencil: iPadOS **Scribble** turns your handwriting into typed text.
 
 ## Your data
 
-- Notes are stored **only on the device you use**, in the browser's storage. On iPad that's the Home Screen app. A Safari tab has separate storage.
-- **Deleting the Home Screen icon deletes its notes.** Use **Settings → Export backup** now and then, and keep the `.json` in Files or iCloud Drive.
-- Nothing syncs between devices yet. To move notes, use **Export backup** on one device and **Import backup** on the other.
+- Your notes are stored **only on the device you use**. On Windows that's your user profile (`%APPDATA%\LocalNotes`); in the web app it's the browser's storage.
+- **Updating or deleting the Windows `.exe` keeps your notes.** In the web app, **deleting the Home Screen app, or clearing the browser's site data, deletes its notes.**
+- Back up now and then with **Settings → Export backup**. Nothing syncs between devices yet; to move notes, use **Export backup** on one device and **Import backup** on the other.
 
-## Web version vs Windows app
+## Windows app vs web app
 
-The web version has almost everything. These parts need the **Windows desktop app**, because a web page isn't allowed to do them:
+Both have almost everything. A few features need the Windows app, because a web page isn't allowed to do them:
 
-- Handwriting → text (the Aa button). On iPad, use Scribble instead.
-- Syncing Google, iCloud or Outlook calendars from an iCal link
-- The DeepSeek AI assistant and AI daily brief
-- "Open in PowerPoint" (use **Export** to save the .pptx instead)
+| Feature | Windows | Web / iPad |
+|---|---|---|
+| Notebooks, writing, math, ink, whiteboards, files, tasks, calendar | ✅ | ✅ |
+| Works offline | ✅ | ✅ (after the first visit) |
+| Handwriting → text (the Aa button) | ✅ uses the Windows recognizer | ➖ use iPad Scribble instead |
+| Sync Google / Outlook / iCloud calendars from an iCal link | ✅ | ❌ blocked by those servers |
+| AI assistant and daily brief (DeepSeek, bring your own key) | ✅ | ❌ |
+| Open a presentation in PowerPoint | ✅ | ➖ use Export |
+| Automatic updates | ✅ | ✅ (the app refreshes itself) |
 
 ## Found a bug?
 
-Tell me what you did, what you expected, and what happened, with a screenshot. Add your device and OS version (on iPad: Settings → General → About). **Settings → About → Report a problem** copies the technical details (never your notes).
+[Open an issue](https://github.com/Minuii/localnotes-web/issues) or message me. Say what you did, what you expected and what happened, and add a screenshot and your device and OS. **Settings → About → Report a problem** copies the technical details (never your notes).
 
 ---
 
-*This repository only contains the built web app. It's published automatically from the LocalNotes project.*
+*This repository holds the built web app, served at minuii.github.io/localnotes-web, and the Windows downloads under Releases.*
