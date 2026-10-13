@@ -476,6 +476,9 @@ dialog form{display:grid;gap:10px}
 .cgrid input{width:100%;min-width:0;text-align:center}
 .cout{background:#151515;border:1px solid #2f2f2f;border-radius:10px;padding:8px 12px;font:14px/1.8 Consolas,"SF Mono",monospace;white-space:pre-wrap;min-height:40px}
 .ctab{width:100%;border-collapse:collapse;font:13px Consolas,"SF Mono",monospace}.ctab td,.ctab th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:right}.ctab th{color:var(--mut);font-weight:500}
+.mghost{position:absolute;z-index:3;white-space:pre;color:#8a8a8a;cursor:pointer;border-radius:4px;padding-right:3px}
+.mghost::after{content:'⇥';font-size:.7em;margin-left:4px;opacity:.6}
+.mghost:hover{background:#8a8a8a22}
 .webnote{font-size:13px;color:var(--mut);background:var(--panel2);border-radius:8px;padding:8px 10px;margin:0}
 
 /* narrow windows (iPad portrait): slimmer notebook columns, page header wraps instead of overflowing */
@@ -659,7 +662,7 @@ function seed() {
 /* ---------- math (KaTeX) ---------- */
 function renderOne(el) {
   el.contentEditable = 'false';
-  if (window.katex) katex.render(el.dataset.tex, el, { throwOnError: false, displayMode: el.dataset.display === '1' });
+  if (window.katex) katex.render(texWithAns(el.dataset.tex), el, { throwOnError: false, displayMode: el.dataset.display === '1' });
   else el.textContent = `$${el.dataset.tex}$`;
 }
 function renderAllMath() { document.querySelectorAll('.math').forEach(renderOne); }
@@ -696,7 +699,7 @@ function ask(label, value = '', tex = false) {
     const fin = v => { if (done) return; done = true; d.close(); res(v); };
     d.innerHTML = `<form><label>${esc(label)}</label>${tex ? `<textarea name="v" rows="3" style="font-family:Consolas,monospace">${esc(value)}</textarea><div class="prev"></div><small>Enter to insert · Shift+Enter for a new line</small>` : `<input name="v" value="${esc(value)}">`}<div class="row"><span style="flex:1"></span><button type="button" class="cancel">Cancel</button><button class="pri">OK</button></div></form>`;
     const f = d.firstChild, prev = f.querySelector('.prev');
-    const draw = () => prev && window.katex && katex.render(f.v.value || ' ', prev, { throwOnError: false, displayMode: true });
+    const draw = () => prev && window.katex && katex.render(texWithAns(f.v.value) || ' ', prev, { throwOnError: false, displayMode: true });
     f.v.oninput = draw; draw();
     if (tex) f.v.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fin(f.v.value); } };
     f.onsubmit = e => { e.preventDefault(); fin(f.v.value); };
@@ -1270,6 +1273,7 @@ function openEditor(el, note, refresh, base) {
     });
   };
   let fitT; new ResizeObserver(() => { clearTimeout(fitT); fitT = setTimeout(ink.fit, 100); }).observe(body);
+  mathGhost(body, $('#bw', el));
   const touch = () => {
     const c = body.cloneNode(true); c.querySelectorAll('.math').forEach(m => { m.textContent = ''; m.removeAttribute('contenteditable'); });
     note.html = c.innerHTML; note.updated = Date.now(); save(); refresh();
@@ -2569,6 +2573,9 @@ function viewSettings(section) {
       ${NATIVE ? `<label class="row" style="margin-bottom:8px"><input type="checkbox" data-k="handwriting"${hwOn() ? ' checked' : ''}> <span><b>Handwriting to text</b> <span class="mut">— shows the Aa button in pages, sticky notes, files and the whiteboard. Uses the recognizer built into Windows, offline.</span></span></label>`
         : `<p class="webnote" style="margin-bottom:8px"><b>Handwriting to text</b> (the Aa button) uses Windows and is only in the desktop app. On iPad, use <b>Scribble</b> instead: switch the page to “⌨ Type only” and write with Apple Pencil in the page or any text box — iPadOS turns it into typed text.</p>`}
       <label class="row"><input type="checkbox" data-k="inkShapes"${inkState.shapes ? ' checked' : ''}> <span><b>Ink to shape</b> <span class="mut">— large rough circles, lines, boxes and triangles snap clean (Ctrl+Shift+S).</span></span></label></section>
+    <section class="box" style="margin-bottom:18px" id="mathSet"><h3>Math answers</h3>
+      <label class="row" style="margin-bottom:8px"><input type="checkbox" data-k="mathEq"${S.settings.mathEq === false ? '' : ' checked'}> <span><b>In equations</b> <span class="mut">— end an equation (Alt+=) with “=” and its answer appears after it, e.g. \\frac{3}{4}+2^3 = 35/4.</span></span></label>
+      <label class="row"><input type="checkbox" data-k="mathText"${S.settings.mathText === false ? '' : ' checked'}> <span><b>In notebook pages</b> <span class="mut">— type “12*4 + 7 =” and the answer appears in grey; Tab, Enter or a tap keeps it. A line like “price = 12” sets a value you can use below. Angles follow the calculator's DEG / RAD setting.</span></span></label></section>
     <section class="box" style="margin-bottom:18px"><h3>AI Assistant (DeepSeek)</h3>${NATIVE ? `<p class="mut" style="margin-top:0">Optional. The key is stored only on this computer and is sent only to api.deepseek.com when you use the assistant.</p>
       <div class="row"><input id="key" type="password" placeholder="sk-…" style="flex:1" value="${esc(S.settings.aiKey)}"><select id="model">${['deepseek-chat', 'deepseek-reasoner'].map(m => `<option${m === S.settings.aiModel ? ' selected' : ''}>${m}</option>`).join('')}</select><button class="pri" id="saveKey">Save</button></div>` : DESKTOP_ONLY('The AI assistant')}</section>
     <section class="box" style="margin-bottom:18px"><h3>About</h3><p class="mut" style="margin-top:0"><span id="ver">LocalNotes</span> · Found a bug? <b>Report a problem</b> copies technical details (version, Windows, screen size, how many pages and files you have, recent errors — never your notes, keys or calendar links). Paste them into your message.</p>
@@ -2590,6 +2597,7 @@ function viewSettings(section) {
   };
   $('#calList').onclick = e => { const id = e.target.dataset.rm; if (id && confirm('Remove this calendar?')) { S.settings.cals = S.settings.cals.filter(c => c.id !== id); delete S.ics[id]; save(); route(); } };
   if ($('#calSync')) $('#calSync').onclick = () => { $('#calSync').textContent = 'Syncing…'; syncCals(); };
+  $('#mathSet').onchange = e => { S.settings[e.target.dataset.k] = e.target.checked; save(); };
   $('#penSet').onchange = e => { const k = e.target.dataset.k; if (k === 'inkShapes') { if (inkState.shapes !== e.target.checked) toggleShapes(); } else if (k) { S.settings[k] = e.target.checked; save(); } };
   if (NATIVE) $('#saveKey').onclick = () => { S.settings.aiKey = $('#key').value.trim(); S.settings.aiModel = $('#model').value; save(); $('#saveKey').textContent = 'Saved ✓'; };
   const info = () => NATIVE ? window.native.info() : Promise.resolve({ version: 'web', web: true, os: navigator.userAgent });
@@ -2624,7 +2632,7 @@ const SHORTCUTS = [
   ['General', [['Ctrl+N', 'New page'], ['Ctrl+Alt+N', 'New page below the current one'], ['Ctrl+T', 'New section'], ['Ctrl+Shift+N', 'New notebook'], ['Ctrl+F  /  Ctrl+E', 'Search'], ['Ctrl+J', 'AI assistant'], ['Ctrl+\\', 'Collapse / expand sidebar'], ['Ctrl+,', 'Settings'], ['F1  /  Ctrl+/', 'This shortcuts panel'], ['Ctrl+S', 'Save (everything saves automatically)'], ['Esc', 'Close panels and menus']]],
   ['Go to', [['Alt+1', 'Home'], ['Alt+2', 'Notes'], ['Alt+3', 'Tasks'], ['Alt+4', 'Files'], ['Alt+5', 'Calendar'], ['Alt+6', 'Whiteboards']]],
   ['Writing', [['Ctrl+B / I / U', 'Bold / italic / underline'], ['Ctrl+Alt+1 / 2 / 3', 'Heading 1 / 2 / 3'], ['Ctrl+Alt+0', 'Normal text'], ['Ctrl+.', 'Bulleted list'], ['Ctrl+/', 'Numbered list (in a page)'], ['Ctrl+K', 'Insert link'], ['Ctrl+click', 'Open link'], ['Alt+Shift+D / T / F', 'Insert date / time / both']]],
-  ['Math', [['Alt+=', 'Insert equation (block on an empty line)'], ['$ … $', 'Inline math as you type'], ['$$ … $$', 'Block math as you type'], ['Click a formula', 'Edit it']]],
+  ['Math', [['Alt+=', 'Insert equation (block on an empty line)'], ['12*4 + 7 =', 'In a page: the answer shows in grey — Tab / Enter keeps it'], ['… =', 'An equation ending in = shows its answer'], ['$ … $', 'Inline math as you type'], ['$$ … $$', 'Block math as you type'], ['Click a formula', 'Edit it']]],
   ['Tags', [['Ctrl+1', 'To Do'], ['Ctrl+2', 'Important'], ['Ctrl+3', 'Question'], ['Ctrl+4', 'Remember for later'], ['Ctrl+5', 'Definition'], ['Ctrl+6', 'Critical'], ['Ctrl+0', 'Remove tag']]],
   ['Pages & sections', [['Ctrl+Alt+]', 'Make subpage'], ['Ctrl+Alt+[', 'Promote subpage'], ['Drag page', 'Reorder, or drop on a section to move'], ['Right-click', 'More page / section options'], ['Double-click section', 'Rename']]],
   ['Pen & ink', [['Ctrl+Shift+D', 'Switch: type only → stylus draws → draw with anything'], ['Ctrl+Shift+S', 'Ink to shape on / off (on by default)'], ['Ctrl+Shift+E', 'Pen ↔ eraser'], ['Scribble over ink', 'Scratch-out erase'], ['Pen eraser end', 'Erase'], ['Right-drag (whiteboard)', 'Erase']]],
@@ -2691,16 +2699,18 @@ const CUNIT = { in: 'inch inches', cm: 'centimetre centimeter', ft: 'foot feet',
   'kgf/cm²': 'kgf/cm² kilogram force pressure', 'kgf·m': 'kgf·m kilogram force metre energy torque', J: 'joule energy', 'lbf/in²': 'psi pound force pressure', kPa: 'kilopascal pressure', '°F': 'fahrenheit temperature', '°C': 'celsius centigrade temperature', cal: 'calorie energy' };
 let CPICK; const cpickList = () => CPICK ||= [...CCONST.map(([s, n, v, u], i) => ({ label: s, ins: `[${s}]`, desc: `${n} · ${calcFmt(v)}${u ? ' ' + u : ''}`, find: `const constant ${i + 1} ${s} ${n} ${u}`.toLowerCase() })),
   ...CCONV.map(([n], i) => { const [a, b] = n.split('▸'); return { label: n.replace('▸', ' ▸ '), ins: `[${n}]`, desc: `convert ${CUNIT[a]?.split(' ')[0] || a} to ${CUNIT[b]?.split(' ')[0] || b} — put it after a number`, find: `conv convert ${i + 1} ${n} ${a} ${b} to ${CUNIT[a] || ''} ${CUNIT[b] || ''}`.toLowerCase() }; })];
-function calcTokens(src) {
+function calcTokens(src, names) { // names: { word: value } defined on the page (price = 12)
+  const nk = names ? Object.keys(names).sort((a, b) => b.length - a.length) : [];
   const s = src.replace(/d\/dx/g, 'ddx').replace(/->/g, '→').replace(/∫/g, 'int').replace(/Σ/g, 'sum').replace(/\s+/g, ''), t = [];
   for (let i = 0; i < s.length;) {
-    const rest = s.slice(i), c = s[i], num = /^(\d+\.?\d*|\.\d+)/.exec(rest), fn = CFUNCS.find(n => rest.startsWith(n));
+    const rest = s.slice(i), c = s[i], num = /^(\d+\.?\d*|\.\d+)/.exec(rest), fn = CFUNCS.find(n => rest.startsWith(n)), nm = nk.find(n => rest.startsWith(n) && (n.length === 1 || !/\w/.test(rest[n.length] || '')));
     if (c === '[') { // [c0] constant or [cm▸in] conversion
       const j = s.indexOf(']', i), name = j < 0 ? '' : s.slice(i + 1, j), k = CCONST.find(x => x[0] === name), cv = CCONV.find(x => x[0].replace(/\s/g, '') === name);
       if (k) t.push({ k: 'num', v: k[2] }); else if (cv) t.push({ k: 'op', v: 'conv', f: cv[1] }); else throw CalcErr();
       i = j + 1;
     }
     else if (num) { t.push({ k: 'num', v: parseFloat(num[1]) }); i += num[1].length; }
+    else if (nm) { t.push({ k: 'num', v: names[nm] }); i += nm.length; }
     else if (rest.startsWith('⁻¹')) { t.push({ k: 'op', v: 'inv' }); i += 2; }
     else if (fn) { t.push({ k: 'fn', v: fn }); i += fn.length; }
     else if (rest.startsWith('Ans')) { t.push({ k: 'ans' }); i += 3; }
@@ -2741,8 +2751,8 @@ function cCall(n, a) { // a: argument closures; env.X overrides the X memory ins
   }
   throw CalcErr();
 }
-function calcParse(src) { // -> env => number   (env: { vars, ans, X? })
-  const t = calcTokens(src); let p = 0;
+function calcParse(src, names) { // -> env => number   (env: { vars, ans, X? })
+  const t = calcTokens(src, names); let p = 0;
   const is = v => t[p]?.k === 'op' && t[p].v === v, eat = v => is(v) && ++p;
   const close = () => { if (!eat(')') && p < t.length) throw CalcErr(); }; // a missing ")" at the very end is fine, like on the fx
   const starts = x => x && (x.k !== 'op' || '(√∛'.includes(x.v));
@@ -2980,6 +2990,113 @@ function calcTable(pane, C) {
   };
   pane.querySelectorAll('[data-k]').forEach(i => i.oninput = () => { T[i.dataset.k] = i.value; save(); draw(); });
   draw();
+}
+
+/* ---------- math answers after "=" (like Apple Math Notes): in equations, and in notebook page text ---------- */
+const TEXCMD = { cdot: '×', times: '×', ast: '×', div: '÷', pi: 'π', ln: 'ln', log: 'log', exp: 'exp', sin: 'sin', cos: 'cos', tan: 'tan', sinh: 'sinh', cosh: 'cosh', tanh: 'tanh',
+  arcsin: 'asin', arccos: 'acos', arctan: 'atan', '%': '%', ',': '', ';': '', ':': '', '!': '', ' ': '', quad: '', qquad: '', displaystyle: '' };
+function texToCalc(s) { // LaTeX (the usual school subset) -> calculator expression; throws on anything else
+  let i = 0, out = '';
+  const ws = () => { while (s[i] === ' ') i++; };
+  const grp = () => { // {…}, one \command, or one character
+    ws();
+    if (s[i] === '{') { let d = 0, j = i; for (; j < s.length; j++) { if (s[j] === '{') d++; else if (s[j] === '}' && !--d) break; } if (j >= s.length) throw CalcErr(); const g = s.slice(i + 1, j); i = j + 1; return g; }
+    if (s[i] === '\\') { const m = /^\\([a-zA-Z]+|.)/.exec(s.slice(i)); i += m[0].length; return m[0]; }
+    if (i >= s.length) throw CalcErr(); return s[i++];
+  };
+  const sub = g => `(${texToCalc(g)})`;
+  const atom = () => { // argument after \log_{b}: {…}, (…) or a number / symbol
+    ws(); if (s.startsWith('\\left', i)) i += 5;
+    if (s[i] === '(') { let d = 0, j = i; for (; j < s.length; j++) { if (s[j] === '(') d++; else if (s[j] === ')' && !--d) break; } const g = s.slice(i + 1, j).replace(/\\right\s*$/, ''); i = j + 1; return g; }
+    const m = /^(\d+\.?\d*|\.\d+)/.exec(s.slice(i)); if (m) { i += m[0].length; return m[0]; }
+    return grp();
+  };
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '\\') {
+      const m = /^\\([a-zA-Z]+|.)/.exec(s.slice(i)); i += m[0].length; const n = m[1];
+      if (/^[dt]?frac$/.test(n)) { const a = grp(), b = grp(); out += `(${sub(a)}÷${sub(b)})`; }
+      else if (n === 'sqrt') { ws(); let k = null; if (s[i] === '[') { const j = s.indexOf(']', i); k = s.slice(i + 1, j); i = j + 1; } const x = grp(); out += k ? `(${sub(x)}^(1÷${sub(k)}))` : `√${sub(x)}`; }
+      else if (n === 'left' || n === 'right') { ws(); let d = s[i++]; if (d === '\\') d = s[i++]; out += d === '|' ? (n === 'left' ? 'abs(' : ')') : d === '.' ? '' : '([{'.includes(d) ? '(' : ')'; }
+      else if (n === 'operatorname' || n === 'mathrm' || n === 'text') out += texToCalc(grp());
+      else if (n in TEXCMD) out += TEXCMD[n];
+      else throw CalcErr();
+    }
+    else if (c === '^') {
+      i++; const g = grp().trim();
+      if (g === '\\circ') continue; // 30^\circ: angles follow the calculator's DEG/RAD setting
+      if (g === '-1' && /(sin|cos|tan)h?$/.test(out)) out = out.replace(/(sin|cos|tan)(h?)$/, 'a$1$2'); else out += `^${sub(g)}`;
+    }
+    else if (c === '_') { i++; const b = grp(); if (!out.endsWith('log')) throw CalcErr(); out += `(${texToCalc(b)},${texToCalc(atom())})`; }
+    else if (c === '{' || c === '[') { out += '('; i++; }
+    else if (c === '}' || c === ']') { out += ')'; i++; }
+    else if (c === '&' || c === '~') i++;
+    else { out += c; i++; }
+  }
+  return out;
+}
+const isNum = s => /^\s*[-+]?(\d+\.?\d*|\.\d+)\s*$/.test(s);
+const ansText = (v, src) => /[[.]/.test(src) ? calcFmt(v) : calcShow(v); // typed decimals or units -> decimal answer
+function texAnswer(tex) { // equation ending in "=" -> answer text, or null
+  if (S?.settings.mathEq === false) return null;
+  const m = /^([\s\S]*[^=<>!\\])=\s*$/.exec((tex || '').trim()); if (!m) return null;
+  const ex = m[1].slice(m[1].lastIndexOf('=') + 1); // "y = 2+3 =" answers 2+3
+  try { const src = texToCalc(ex); if (isNum(src)) return null; return ansText(calcEval(src), src); } catch { return null; }
+}
+const ansTex = a => a.replace(/^(-?)(\d+)\/(\d+)$/, '$1\\frac{$2}{$3}').replace(/×10\^(-?\d+)/, '\\times10^{$1}');
+function texWithAns(tex) { const a = texAnswer(tex); return a == null ? tex : `${tex}\\;\\color{#2dbe60}{${ansTex(a)}}`; }
+
+const prepText = (ex, names) => { // everyday typing: $12, 1,200, 3 x 4
+  ex = ex.replace(/[$€£¥]/g, '').replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
+  if (!('x' in names)) ex = ex.replace(/([\d.)])\s*x\s*(?=[\d.(])/g, '$1×');
+  return ex.trim();
+};
+function pageVars(root) { // "price = 12" lines on the page -> { price: 12 }
+  const names = {};
+  for (const ln of root.innerText.split('\n')) {
+    const m = /^\s*([A-Za-z_]\w*)\s*=\s*([^=]+?)\s*$/.exec(ln);
+    if (!m || CFUNCS.includes(m[1]) || m[1] === 'Ans') continue;
+    try { names[m[1]] = calcChk(calcParse(prepText(m[2], names), names)({ vars: CS().vars, ans: CS().ans })); } catch { }
+  }
+  return names;
+}
+function textAnswer(line, names) { // "12*4 + 7 =" -> "55", or null
+  const m = /^(.*[^=<>!])=\s*$/.exec(line); if (!m) return null;
+  const ex = prepText(m[1].slice(Math.max(m[1].lastIndexOf('='), m[1].lastIndexOf(':')) + 1), names); // "Total: 3+4 =", "y = 3+4 ="
+  if (!ex || isNum(ex)) return null;
+  try { return calcFmt(calcChk(calcParse(ex, names)({ vars: CS().vars, ans: CS().ans }))); } catch { return null; } // page text: plain decimals, like Apple's Math Notes
+}
+function lineBeforeCaret(root, r) { // the text of the current line, up to the caret
+  let blk = r.startContainer.nodeType === 3 ? r.startContainer.parentNode : r.startContainer;
+  blk = blk.closest?.('p,div,li,h1,h2,h3,blockquote,pre,td') || root; if (!root.contains(blk)) blk = root;
+  const rr = document.createRange(); rr.setStart(blk, 0); rr.setEnd(r.startContainer, r.startOffset);
+  const f = rr.cloneContents(); f.querySelectorAll('br').forEach(b => b.replaceWith('\n')); f.querySelectorAll('.math,.ntag,input').forEach(x => x.replaceWith('￼'));
+  return f.textContent.split('\n').pop();
+}
+function mathGhost(body, wrap) { // grey answer after "…=" at the caret; Tab / Enter / a tap types it in
+  const g = Object.assign(document.createElement('span'), { className: 'mghost', title: 'Tab or Enter to keep the answer' }); g.dataset.noink = ''; g.hidden = true; wrap.append(g);
+  let ans = null;
+  const hide = () => { g.hidden = true; ans = null; };
+  const show = () => {
+    hide(); if (S.settings.mathText === false) return;
+    const sel = getSelection(); if (!sel.rangeCount || !sel.isCollapsed) return;
+    const r = sel.getRangeAt(0); if (!body.contains(r.startContainer)) return;
+    const line = lineBeforeCaret(body, r); if (!/=\s*$/.test(line)) return;
+    const a = textAnswer(line, pageVars(body)); if (a == null) return;
+    const rect = r.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); if (!rect.height) return;
+    ans = (/\s=$/.test(line) ? ' ' : '') + a;
+    const cs = getComputedStyle(r.startContainer.nodeType === 3 ? r.startContainer.parentNode : r.startContainer);
+    Object.assign(g.style, { left: rect.right - wr.left + wrap.scrollLeft + 'px', top: rect.top - wr.top + wrap.scrollTop + 'px', height: rect.height + 'px', lineHeight: rect.height + 'px', fontSize: cs.fontSize, fontWeight: cs.fontWeight, fontFamily: cs.fontFamily });
+    g.textContent = ans; g.hidden = false;
+  };
+  const accept = () => { const t = ans; hide(); body.focus(); document.execCommand('insertText', false, t); };
+  body.addEventListener('keydown', e => {
+    if (ans != null && (e.key === 'Tab' || e.key === 'Enter') && !e.shiftKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); e.stopImmediatePropagation(); accept(); }
+    else if (e.key !== 'Shift') hide();
+  }, true);
+  body.addEventListener('input', () => setTimeout(show));
+  body.addEventListener('blur', hide); body.addEventListener('pointerdown', hide);
+  g.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); if (ans != null) accept(); };
 }
 
 /* ---------- AI assistant ---------- */
