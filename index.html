@@ -788,12 +788,18 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
     const shield = e.target.closest?.('[data-noink]'); if (shield && !shield.contains(host)) return; // e.g. a sticky note sitting on this slide
     if (e.pointerType === 'touch' && penDown) { e.preventDefault(); e.stopPropagation(); return; } // palm resting on the screen while the pen writes
     if (!always && inkState.mode === 'pen' && e.pointerType === 'touch') return touchScroll(e, host);
+    if (!always && e.pointerType === 'touch' && cur?.touch) { // "Draw (all input)": a second finger landing right away means two-finger scroll, not drawing
+      e.preventDefault(); e.stopPropagation();
+      if (performance.now() - cur.t0 > 400) return; // the first finger has been drawing a while: treat this one as a resting hand
+      if (cur.erase) list().push(...cur.removed); cur = null; redraw(); // drop what the first finger started
+      return touchScroll(e, host);
+    }
     if (!always && (inkState.mode === 'type' || (inkState.mode === 'pen' && e.pointerType !== 'pen'))) return;
     if (e.button !== 0 && e.button !== 5) return;
     e.preventDefault(); e.stopPropagation(); try { host.setPointerCapture(e.pointerId); } catch { }
     const erase = inkState.tool === 'eraser' || e.button === 5 || (e.buttons & 32);
     penDown = e.pointerType === 'pen';
-    cur = { id: e.pointerId, erase, removed: [], s: erase ? null : { t: 'pen', c: pen?.c || inkState.color, w: pen?.w || inkState.size, pts: [] } };
+    cur = { id: e.pointerId, touch: e.pointerType === 'touch', t0: performance.now(), erase, removed: [], s: erase ? null : { t: 'pen', c: pen?.c || inkState.color, w: pen?.w || inkState.size, pts: [] } };
     move(e);
   }, true);
   host.addEventListener('pointermove', move, true);

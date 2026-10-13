@@ -31,7 +31,8 @@ It also runs in any modern browser on a computer. In Chrome or Edge, use the ins
 | Do this | To |
 |---|---|
 | Write with the Pencil | Draw ink (in **✒ Stylus draws** mode, the default) |
-| Drag with one finger | Scroll, or pan on a whiteboard |
+| Drag with one finger | Scroll a page, or pan on a whiteboard |
+| Drag with two fingers | Scroll a page in **✒ Draw (all input)** mode, where one finger draws |
 | Pinch with two fingers | Zoom a whiteboard |
 | Press and hold | Open the menu (like right-click), e.g. on a page or section |
 | Switch to **⌨ Type only** and write with the Pencil | iPadOS **Scribble** turns your handwriting into typed text |
