@@ -496,6 +496,21 @@ dialog form{display:grid;gap:10px}
 .cacts{display:flex;gap:6px;flex-wrap:wrap}.cacts button{height:30px;font-size:12.5px;border-radius:8px;padding:0 10px}
 .ctab{width:100%;border-collapse:collapse;font:13.5px var(--numf);font-variant-numeric:tabular-nums}.ctab td,.ctab th{padding:6px 8px;border-bottom:1px solid var(--s3);text-align:right}.ctab th{color:var(--mut);font-weight:500;font-size:12px}.ctab tr:last-child td{border-bottom:none}
 .cgraph{width:100%;aspect-ratio:16/11;display:block;border-radius:12px;background:var(--s0);border:1px solid var(--s3)}
+#calc.wide{width:min(820px,calc(100vw - 32px))}
+.gfn{display:flex;align-items:center;gap:8px}.gfn b{font:600 13px var(--numf);color:var(--t2);white-space:nowrap}.gfn input{flex:1;min-width:0;font:15px var(--monof)!important}
+.gdot{width:14px!important;height:14px!important;min-width:0!important;min-height:0!important;padding:0;border-radius:50%;border:2px solid var(--c);background:var(--c);flex:none}.gdot.off{background:none}
+.gx{width:26px;height:26px;padding:0;justify-content:center;background:none;border:none;color:var(--mut);font-size:16px}.gx:hover{color:var(--t1)}
+.gadd{justify-self:start;height:28px;font-size:12.5px;border-radius:8px;background:none;border-style:dashed;color:var(--mut)}
+.gsls{display:grid;gap:4px;background:var(--s1);border-radius:12px;padding:8px 10px}
+.gsl{display:grid;grid-template-columns:18px auto 1fr auto 64px;align-items:center;gap:6px}.gsl b{font:600 14px var(--numf);color:var(--acc2)}.gsl small{font-size:11px;color:var(--mut)}.gsl input[type=range]{width:100%;accent-color:var(--acc2)}
+.gpv{padding:3px 6px!important;font:13px var(--numf)!important;text-align:center}
+.gwrap{position:relative}.gwrap canvas{touch-action:none;cursor:crosshair}
+.gzoom{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:4px}
+.gzoom button{width:30px;height:30px;padding:0;justify-content:center;border-radius:8px;background:color-mix(in srgb,var(--s3) 85%,transparent);border:1px solid var(--s4);font-size:16px;color:var(--t2)}
+.gerr:empty{display:none}.gerr{color:#ff8a8a;font-size:13px;padding:8px 12px}
+.gpts{display:grid;gap:2px;max-height:170px;overflow:auto;font-size:12.5px}
+.gpts div{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:8px;cursor:pointer}.gpts div:hover{background:var(--s3)}
+.gpts i{width:8px;height:8px;border-radius:50%;flex:none}.gpts span{flex:1;color:var(--t2)}.gpts b{font:500 13px var(--numf);font-variant-numeric:tabular-nums;color:var(--t1)}
 .cleg{display:flex;gap:14px;font-size:12px;color:var(--mut)}.cleg i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
 /* designs: the pattern shows around the panels and softly behind pages */
 body.patterned{background-repeat:repeat}
@@ -2799,7 +2814,7 @@ document.addEventListener('keydown', e => {
 });
 
 /* ---------- calculator: fx-style scientific (expressions, equations, stats, tables) ---------- */
-const CS = () => S.settings.calc ||= { ang: 'deg', vars: {}, hist: [], ans: 0, tab: 'calc', eq: { t: 'quad', v: {} }, stat: '', tbl: { f: 'X²', a: '1', b: '5', s: '1' } };
+const CS = () => S.settings.calc ||= { ang: 'deg', vars: {}, hist: [], ans: 0, tab: 'calc', eq: { t: 'quad', v: {} }, stat: '', tbl: { fs: [{ s: 'X²' }], a: '-5', b: '5', s: '1' } };
 const CalcErr = (m = 'Syntax ERROR') => Object.assign(new Error(m), { calc: true });
 const CFUNCS = ['asinh', 'acosh', 'atanh', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'sqrt', 'cbrt', 'abs', 'exp', 'log', 'ln', 'nCr', 'nPr', 'ddx', 'int', 'sum'];
 // the fx's 40 scientific constants (CODATA 2018) and 40 metric conversions (NIST SP 811), written [name] and [from▸to] in expressions
@@ -2841,7 +2856,7 @@ function calcTokens(src, names) { // names: { word: value } defined on the page 
     else if (rest.startsWith('Ans')) { t.push({ k: 'ans' }); i += 3; }
     else if (c === 'π' || c === 'e') { t.push({ k: 'num', v: c === 'π' ? Math.PI : Math.E }); i++; }
     else if (/[A-FMXY]/.test(c)) { t.push({ k: 'var', v: c }); i++; }
-    else if ('+-−×*÷/^(),!²³%→√∛'.includes(c)) { t.push({ k: 'op', v: { '−': '-', '*': '×', '/': '÷' }[c] || c }); i++; }
+    else if ('+-−×*·÷/^(),!²³%→√∛'.includes(c)) { t.push({ k: 'op', v: { '−': '-', '*': '×', '·': '×', '/': '÷' }[c] || c }); i++; }
     else throw CalcErr();
   }
   return t;
@@ -3110,72 +3125,168 @@ function calcStat(pane, C) {
   $('#stins').onclick = () => rows.length ? cInsert(rows.map(r => r.replace(/\s{2,}/g, ' ')).join('\n')) : toast('Type some data first');
   draw();
 }
-// graph of f(X) (and g(X)) over [a, b] on a canvas; st: colours for the panel, a dark page or a light page
-function plotGraph(cv, T, C, st) {
-  const W = cv.width, H = cv.height, g = cv.getContext('2d'), k = cv._k || 1, F = getComputedStyle(document.documentElement).getPropertyValue('--numf');
-  const fns = [['f', T.f], ['g', T.g]].filter(([, s]) => s?.trim()).map(([n, s]) => ({ n, s, f: calcParse(s), col: st.cols[n === 'f' ? 0 : 1] }));
+// ---- grapher: up to 4 functions of X, sliders for A–F, pan / zoom / trace, key points (roots, min/max, crossings)
+const GNAMES = ['f', 'g', 'h', 'p'];
+const gStyle = kind => { const v = getComputedStyle(document.documentElement), c = n => v.getPropertyValue('--' + n).trim();
+  return kind === 'light' ? { bg: '#ffffff', grid: '#e7e7e7', axis: '#8a8a8a', text: '#666666', cols: [c('acc'), '#d9822b', '#2f6fd6', '#b0479c'] }
+    : { bg: kind === 'page' ? c('s1') : c('s0'), grid: c('s3'), axis: c('t5'), text: c('mut'), cols: [c('acc2'), '#f0b35a', '#6fb7ff', '#e58ad6'] }; };
+const gParams = T => [...new Set(T.fs.flatMap(o => { try { return calcTokens(o.s).filter(t => t.k === 'var' && t.v !== 'X').map(t => t.v); } catch { return []; } }))].sort();
+function graphModel(T, C) { // parsed functions, parameters and the visible range
+  const vars = { ...C.vars }; for (const n of gParams(T)) vars[n] = T.pv[n] ?? C.vars[n] ?? 1; // slider values
+  const fns = T.fs.map((o, i) => ({ ...o, n: GNAMES[i], i })).filter(o => o.s.trim() && !o.off).map(o => ({ ...o, f: calcParse(o.s) }));
   if (!fns.length) throw CalcErr('Type f(X) to draw it');
-  const a = calcEval(T.a), b = calcEval(T.b); if (!(b > a)) throw CalcErr('Use a Start smaller than the End');
-  const N = 700, xs = Array.from({ length: N + 1 }, (_, i) => a + (b - a) * i / N);
-  fns.forEach(o => o.ys = xs.map(x => { try { const y = o.f({ vars: C.vars, ans: C.ans, X: x }); return Number.isFinite(y) ? y : NaN; } catch { return NaN; } }));
-  const all = fns.flatMap(o => o.ys).filter(Number.isFinite).sort((p, q) => p - q); if (!all.length) throw CalcErr('Nothing to draw in this range');
-  let lo = all[Math.floor(all.length * .02)], hi = all[Math.ceil(all.length * .98) - 1];
-  if (all.at(-1) - all[0] <= 4 * Math.max(hi - lo, 1e-9)) [lo, hi] = [all[0], all.at(-1)]; // keep the whole curve unless it shoots off (asymptotes)
-  if (hi - lo < 1e-9) { lo -= 1; hi += 1; } const pad = (hi - lo) * .08; lo -= pad; hi += pad;
-  const m = { l: 46 * k, r: 14 * k, t: 14 * k, b: 28 * k }, X = x => m.l + (x - a) / (b - a) * (W - m.l - m.r), Y = y => H - m.b - (y - lo) / (hi - lo) * (H - m.t - m.b);
+  const a = calcEval(T.a), b = calcEval(T.b); if (!(b > a)) throw CalcErr('Use an X min smaller than X max');
+  const lo = String(T.ymin ?? '').trim() ? calcEval(T.ymin) : null, hi = String(T.ymax ?? '').trim() ? calcEval(T.ymax) : null;
+  if (lo != null && hi != null && !(hi > lo)) throw CalcErr('Use a Y min smaller than Y max');
+  const env = x => ({ vars, ans: C.ans, X: x });
+  fns.forEach(o => o.at = x => { try { const y = o.f(env(x)); return Number.isFinite(y) ? y : NaN; } catch { return NaN; } });
+  return { fns, a, b, lo, hi };
+}
+function keyPoints(M, xs, span) { // roots, turning points, y-intercepts and crossings, refined numerically
+  const out = [], near = (x, k) => out.some(p => p.k === k && Math.abs(p.x - x) < (M.b - M.a) * 1e-6);
+  const bis = (F, u, v) => { let fu = F(u); for (let i = 0; i < 64; i++) { const w = (u + v) / 2, fw = F(w); if (!Number.isFinite(fw)) return null; if (fu * fw <= 0) v = w; else { u = w; fu = fw; } } return (u + v) / 2; };
+  const gold = (F, u, v, max) => { const r = (Math.sqrt(5) - 1) / 2; let c = v - r * (v - u), d = u + r * (v - u); for (let i = 0; i < 70; i++) { if ((F(c) > F(d)) === max) v = d; else u = c; c = v - r * (v - u); d = u + r * (v - u); } return (u + v) / 2; };
+  const zeros = (F, ys, add) => { for (let i = 1; i < xs.length; i++) { const y0 = ys[i - 1], y1 = ys[i]; if (!Number.isFinite(y0) || !Number.isFinite(y1) || Math.abs(y1 - y0) > span) continue; if (y0 === 0) add(xs[i - 1]); else if (y0 * y1 < 0) { const x = bis(F, xs[i - 1], xs[i]); if (x != null && Math.abs(F(x)) < 1e-6 * Math.max(1, span)) add(x); } } };
+  for (const o of M.fns) {
+    zeros(o.at, o.ys, x => !near(x, 'root' + o.n) && out.push({ k: 'root' + o.n, t: 'root', o, x, y: 0 }));
+    for (let i = 1; i < xs.length - 1; i++) {
+      const d0 = o.ys[i] - o.ys[i - 1], d1 = o.ys[i + 1] - o.ys[i];
+      if (!Number.isFinite(d0) || !Number.isFinite(d1) || d0 * d1 >= 0 || Math.abs(d0) + Math.abs(d1) > span * .5) continue;
+      const max = d0 > 0, x = gold(o.at, xs[i - 1], xs[i + 1], max), y = o.at(x);
+      if (Number.isFinite(y) && !near(x, 'ext' + o.n)) out.push({ k: 'ext' + o.n, t: max ? 'max' : 'min', o, x, y });
+    }
+    if (M.a <= 0 && M.b >= 0) { const y = o.at(0); if (Number.isFinite(y)) out.push({ k: 'yint' + o.n, t: 'y-intercept', o, x: 0, y }); }
+  }
+  M.fns.forEach((o, i) => M.fns.slice(i + 1).forEach(q => { const F = x => o.at(x) - q.at(x); zeros(F, o.ys.map((y, j) => y - q.ys[j]), x => !near(x, 'x' + o.n + q.n) && out.push({ k: 'x' + o.n + q.n, t: `${o.n} = ${q.n}`, o, q, x, y: o.at(x) })); }));
+  return out.slice(0, 60);
+}
+// draws the graph; returns the geometry so the panel can pan, zoom and trace. st: colours (+ legend, points, trace)
+function plotGraph(cv, M, st) {
+  const W = cv.width, H = cv.height, g = cv.getContext('2d'), k = cv._k || 1, F = getComputedStyle(document.documentElement).getPropertyValue('--numf');
+  const N = Math.min(900, Math.max(300, Math.round(W / k))), xs = Array.from({ length: N + 1 }, (_, i) => M.a + (M.b - M.a) * i / N);
+  M.fns.forEach(o => { o.ys = xs.map(o.at); o.col = st.cols[o.i]; });
+  let { lo, hi } = M;
+  if (lo == null || hi == null) { // automatic Y: the whole curve unless it shoots off (asymptotes)
+    const all = M.fns.flatMap(o => o.ys).filter(Number.isFinite).sort((p, q) => p - q); if (!all.length) throw CalcErr('Nothing to draw in this range');
+    let l = all[Math.floor(all.length * .02)], h = all[Math.ceil(all.length * .98) - 1];
+    if (all.at(-1) - all[0] <= 4 * Math.max(h - l, 1e-9)) [l, h] = [all[0], all.at(-1)];
+    if (h - l < 1e-9) { l -= 1; h += 1; } const pad = (h - l) * .08;
+    lo ??= l - pad; hi ??= h + pad; if (!(hi > lo)) hi = lo + 1;
+  }
+  const m = { l: 48 * k, r: 14 * k, t: 14 * k, b: 28 * k }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const X = x => m.l + (x - M.a) / (M.b - M.a) * pw, Y = y => H - m.b - (y - lo) / (hi - lo) * ph, ix = px => M.a + (px - m.l) / pw * (M.b - M.a), iy = py => lo + (H - m.b - py) / ph * (hi - lo);
   const ticks = (p, q, n) => { const s0 = (q - p) / n, mg = 10 ** Math.floor(Math.log10(s0)), s = [1, 2, 5, 10].map(v => v * mg).find(v => v >= s0), out = []; for (let v = Math.ceil(p / s) * s; v <= q + s * 1e-9; v += s) out.push(+v.toPrecision(12)); return out; };
   const lab = v => Math.abs(v) >= 1e5 || (v && Math.abs(v) < 1e-3) ? v.toExponential(1) : String(+v.toPrecision(6));
   const ln = (x0, y0, x1, y1) => { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); };
   g.fillStyle = st.bg; g.fillRect(0, 0, W, H); g.lineWidth = k; g.font = `${11 * k}px ${F}`; g.textBaseline = 'middle';
-  for (const x of ticks(a, b, 6)) { g.strokeStyle = st.grid; ln(X(x), m.t, X(x), H - m.b); g.fillStyle = st.text; g.textAlign = 'center'; g.fillText(lab(x), X(x), H - m.b + 14 * k); }
-  for (const y of ticks(lo, hi, 5)) { g.strokeStyle = st.grid; ln(m.l, Y(y), W - m.r, Y(y)); g.fillStyle = st.text; g.textAlign = 'right'; g.fillText(lab(y), m.l - 7 * k, Y(y)); }
+  for (const x of ticks(M.a, M.b, Math.max(3, Math.round(pw / (70 * k))))) { g.strokeStyle = st.grid; ln(X(x), m.t, X(x), H - m.b); g.fillStyle = st.text; g.textAlign = 'center'; g.fillText(lab(x), X(x), H - m.b + 14 * k); }
+  for (const y of ticks(lo, hi, Math.max(3, Math.round(ph / (55 * k))))) { g.strokeStyle = st.grid; ln(m.l, Y(y), W - m.r, Y(y)); g.fillStyle = st.text; g.textAlign = 'right'; g.fillText(lab(y), m.l - 7 * k, Y(y)); }
   g.strokeStyle = st.axis; g.lineWidth = 1.3 * k;
-  if (a <= 0 && b >= 0) ln(X(0), m.t, X(0), H - m.b);
+  if (M.a <= 0 && M.b >= 0) ln(X(0), m.t, X(0), H - m.b);
   if (lo <= 0 && hi >= 0) ln(m.l, Y(0), W - m.r, Y(0));
-  g.save(); g.beginPath(); g.rect(m.l, m.t, W - m.l - m.r, H - m.t - m.b); g.clip(); g.lineWidth = 2.4 * k; g.lineJoin = g.lineCap = 'round';
+  g.save(); g.beginPath(); g.rect(m.l, m.t, pw, ph); g.clip(); g.lineWidth = 2.4 * k; g.lineJoin = g.lineCap = 'round';
   const span = hi - lo;
-  for (const o of fns) {
+  for (const o of M.fns) {
     g.strokeStyle = o.col; g.beginPath(); let on = false, py = 0;
     o.ys.forEach((y, i) => { if (!Number.isFinite(y) || y < lo - 3 * span || y > hi + 3 * span) { on = false; return; } if (on && Math.abs(y - py) > span * 1.2) on = false; on ? g.lineTo(X(xs[i]), Y(y)) : g.moveTo(X(xs[i]), Y(y)); on = true; py = y; });
     g.stroke();
   }
+  const pts = st.points ? keyPoints(M, xs, span) : [];
+  for (const p of pts) { g.beginPath(); g.arc(X(p.x), Y(p.y), 4.2 * k, 0, 7); g.fillStyle = p.q ? st.text : st.bg; g.fill(); g.lineWidth = 2 * k; g.strokeStyle = p.o.col; g.stroke(); }
+  if (st.trace) { // crosshair + (x, y) label
+    const { x, y, col } = st.trace, sx = X(x), sy = Y(y), txt = `(${lab(x)}, ${lab(y)})`;
+    g.setLineDash([4 * k, 4 * k]); g.strokeStyle = st.axis; g.lineWidth = k; ln(sx, m.t, sx, H - m.b); g.setLineDash([]);
+    g.beginPath(); g.arc(sx, sy, 5.5 * k, 0, 7); g.fillStyle = col; g.fill(); g.lineWidth = 2 * k; g.strokeStyle = st.bg; g.stroke();
+    g.font = `600 ${12 * k}px ${F}`; const tw = g.measureText(txt).width + 14 * k, tx = Math.min(sx + 10 * k, W - m.r - tw), ty = Math.max(m.t + 12 * k, sy - 18 * k);
+    g.fillStyle = st.bg; g.globalAlpha = .9; g.fillRect(tx, ty - 11 * k, tw, 22 * k); g.globalAlpha = 1; g.fillStyle = col; g.textAlign = 'left'; g.fillText(txt, tx + 7 * k, ty);
+  }
   g.restore();
-  if (st.legend) { g.font = `${12 * k}px ${F}`; g.textAlign = 'left'; fns.forEach((o, i) => { const y = m.t + 12 * k + i * 18 * k; g.fillStyle = o.col; g.fillRect(m.l + 10 * k, y - 1.5 * k, 16 * k, 3 * k); g.fillStyle = st.text; g.fillText(`${o.n}(X) = ${o.s}`, m.l + 32 * k, y); }); }
-  return fns;
+  if (st.legend) { g.font = `${12 * k}px ${F}`; g.textAlign = 'left'; M.fns.forEach((o, i) => { const y = m.t + 12 * k + i * 18 * k; g.fillStyle = o.col; g.fillRect(m.l + 10 * k, y - 1.5 * k, 16 * k, 3 * k); g.fillStyle = st.text; g.fillText(`${o.n}(X) = ${o.s}`, m.l + 32 * k, y); }); }
+  return { X, Y, ix, iy, lo, hi, m, pw, ph, pts };
 }
-const gStyle = kind => { const v = getComputedStyle(document.documentElement), c = n => v.getPropertyValue('--' + n).trim();
-  return kind === 'light' ? { bg: '#ffffff', grid: '#e7e7e7', axis: '#8a8a8a', text: '#666666', cols: [c('acc'), '#d9822b'] } : { bg: kind === 'page' ? c('s1') : c('s0'), grid: c('s3'), axis: c('t5'), text: c('mut'), cols: [c('acc2'), '#f0b35a'] }; };
 function calcTable(pane, C) {
-  const T = C.tbl; T.view ||= 'table';
-  pane.innerHTML = `<div class="cform"><label class="cf">f(X) =<input data-k="f" value="${esc(T.f)}" placeholder="e.g. X² − 2X"></label><label class="cf">g(X) = (optional)<input data-k="g" value="${esc(T.g || '')}" placeholder="e.g. sin(X)"></label>
-    <div class="cgrid" style="grid-template-columns:repeat(3,1fr)"><small>Start</small><small>End</small><small>Step</small><input data-k="a" value="${esc(T.a)}"><input data-k="b" value="${esc(T.b)}"><input data-k="s" value="${esc(T.s)}"></div>
-    <div class="seg" id="tview" style="height:32px">${[['table', 'Table'], ['graph', 'Graph']].map(([v, t]) => `<button data-v="${v}" style="flex:1"${T.view === v ? ' class="on"' : ''}>${t}</button>`).join('')}</div><div id="tbout"></div></div>`;
+  const T = C.tbl; T.view ||= 'table'; T.pv ||= {}; T.pr ||= {};
+  if (!T.fs) { T.fs = [T.f, T.g].filter(s => s?.trim()).map(s => ({ s })); if (!T.fs.length) T.fs = [{ s: 'X²' }]; } // older single f / g
+  if (T.a === '1' && T.b === '5' && !T.moved) { T.a = '-5'; T.b = '5'; }
+  const el = $('#calc'); el.classList.toggle('wide', !!C.wide);
+  const params = gParams(T);
+  const fnRows = T.fs.map((o, i) => `<div class="gfn"><button class="gdot${o.off ? ' off' : ''}" data-tog="${i}" title="Show / hide" style="--c:${gStyle('panel').cols[i]}"></button><b>${GNAMES[i]}(X) =</b><input data-f="${i}" value="${esc(o.s)}" placeholder="${['e.g. X² − 2X', 'e.g. sin(X)', 'e.g. A·X + B', 'e.g. 1/X'][i]}">${T.fs.length > 1 ? `<button class="gx" data-rm="${i}" title="Remove">×</button>` : ''}</div>`).join('');
+  const sliders = params.map(n => { const r = T.pr[n] || { min: -10, max: 10 }, v = T.pv[n] ?? C.vars[n] ?? 1; return `<div class="gsl"><b>${n}</b><small>${r.min}</small><input type="range" data-p="${n}" min="${r.min}" max="${r.max}" step="${(r.max - r.min) / 400}" value="${v}"><small>${r.max}</small><input class="gpv" data-pv="${n}" value="${+(+v).toPrecision(6)}"></div>`; }).join('');
+  pane.innerHTML = `<div class="cform">${fnRows}${T.fs.length < 4 ? '<button class="gadd" id="gadd">＋ Add function</button>' : ''}
+    ${sliders ? `<div class="gsls"><small class="mut">Sliders — letters A–F, M and Y in the functions</small>${sliders}</div>` : ''}
+    <div class="seg" id="tview" style="height:32px">${[['table', 'Table'], ['graph', 'Graph']].map(([v, t]) => `<button data-v="${v}" style="flex:1"${T.view === v ? ' class="on"' : ''}>${t}</button>`).join('')}</div>
+    <div class="cgrid" style="grid-template-columns:repeat(${T.view === 'graph' ? 4 : 3},1fr)">${(T.view === 'graph' ? [['a', 'X min'], ['b', 'X max'], ['ymin', 'Y min'], ['ymax', 'Y max']] : [['a', 'Start'], ['b', 'End'], ['s', 'Step']]).map(([, l]) => `<small>${l}</small>`).join('')}${(T.view === 'graph' ? ['a', 'b', 'ymin', 'ymax'] : ['a', 'b', 's']).map(k => `<input data-k="${k}" value="${esc(T[k] ?? '')}"${k.startsWith('y') ? ' placeholder="auto"' : ''}>`).join('')}</div>
+    <div id="tbout"></div></div>`;
   const toURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+  const fmt = v => String(+v.toPrecision(5));
+  let geo = null, M = null, trace = null, cv = null;
+  const paint = () => { // redraw only the canvas (pan, zoom, trace, sliders)
+    try { M = graphModel(T, C); geo = plotGraph(cv, M, { ...gStyle('panel'), points: true, trace }); $('#gerr').textContent = ''; listPoints(); }
+    catch (e) { if (!e.calc) console.error(e); $('#gerr').textContent = e.calc ? e.message : 'Syntax ERROR'; }
+  };
+  const listPoints = () => {
+    const L = $('#gpts'); if (!L) return; const lab = v => calcFmt(Math.abs(v) < 1e-12 ? 0 : v);
+    L.innerHTML = geo.pts.length ? geo.pts.map((p, i) => `<div data-pt="${i}"><i style="background:${p.o.col}"></i><span>${p.q ? `${p.o.n} and ${p.q.n} cross` : `${p.o.n}: ${p.t}`}</span><b>(${lab(p.x)}, ${lab(p.y)})</b></div>`).join('') : '<small class="mut">No roots, turning points or crossings in view.</small>';
+  };
+  const setView = (a, b, lo, hi) => { T.a = fmt(a); T.b = fmt(b); if (lo != null) { T.ymin = fmt(lo); T.ymax = fmt(hi); } T.moved = true; pane.querySelectorAll('[data-k]').forEach(i => { if (document.activeElement !== i) i.value = T[i.dataset.k] ?? ''; }); clearTimeout(T._t); T._t = setTimeout(save, 400); paint(); };
+  const zoom = (f, px, py) => { if (!geo) return; const x0 = geo.ix(px ?? geo.m.l + geo.pw / 2), y0 = geo.iy(py ?? geo.m.t + geo.ph / 2); setView(x0 - (x0 - M.a) * f, x0 + (M.b - x0) * f, y0 - (y0 - geo.lo) * f, y0 + (geo.hi - y0) * f); };
+  const traceAt = (px, py) => { // nearest curve at this x, snapping to key points
+    if (!geo) return; const snap = geo.pts.find(p => Math.hypot(geo.X(p.x) - px, geo.Y(p.y) - py) < 12 * cv._k); if (snap) { trace = { x: snap.x, y: snap.y, col: snap.o.col }; return paint(); }
+    const x = geo.ix(px); let best = null; for (const o of M.fns) { const y = o.at(x); if (!Number.isFinite(y)) continue; const d = Math.abs(geo.Y(y) - py); if (!best || d < best.d) best = { d, x, y, col: o.col }; }
+    trace = best; paint();
+  };
   const draw = () => {
     const out = $('#tbout');
+    if (T.view === 'graph') {
+      out.innerHTML = `<div class="gwrap"><canvas class="cgraph" id="cgv"></canvas><div class="gzoom"><button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">−</button><button data-z="reset" title="Reset view (−10…10, automatic Y)">${icon('fit', 14)}</button><button data-z="wide" title="${C.wide ? 'Narrower panel' : 'Wider panel'}">${C.wide ? '⇥' : '⇤'}</button></div></div><div class="cres2 gerr" id="gerr"></div>
+        <div class="gpts" id="gpts"></div><div class="cacts"><button id="gins">${icon('noteplus', 14)} Insert into page</button><button id="gcopy">Copy image</button><button id="gsave">${icon('download', 14)} Save PNG</button></div>
+        <small class="mut">Drag to move · scroll or pinch to zoom · hover or tap a curve to trace it</small>`;
+      cv = $('#cgv'); const k = devicePixelRatio || 1; cv._k = k; cv.width = Math.round(cv.clientWidth * k); cv.height = Math.round(cv.clientWidth * (C.wide ? 10 : 11) / 16 * k);
+      paint();
+      const pts = new Map(); let drag = null, moved = false;
+      const loc = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * k, (e.clientY - r.top) * k]; };
+      cv.onpointerdown = e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, loc(e)); moved = false; if (geo && pts.size === 1) drag = { p: loc(e), a: M.a, b: M.b, lo: geo.lo, hi: geo.hi }; if (pts.size === 2) { const [p, q] = [...pts.values()]; drag = { pinch: Math.hypot(p[0] - q[0], p[1] - q[1]) }; } };
+      cv.onpointermove = e => {
+        const p = loc(e);
+        if (!pts.has(e.pointerId)) { if (e.pointerType === 'mouse') traceAt(...p); return; }
+        pts.set(e.pointerId, p);
+        if (drag?.pinch && pts.size === 2) { const [u, v] = [...pts.values()], d = Math.hypot(u[0] - v[0], u[1] - v[1]); zoom(drag.pinch / d, (u[0] + v[0]) / 2, (u[1] + v[1]) / 2); drag.pinch = d; moved = true; return; }
+        if (!drag || drag.pinch) return; const dx = p[0] - drag.p[0], dy = p[1] - drag.p[1]; if (Math.abs(dx) + Math.abs(dy) > 4 * k) moved = true; if (!moved) return;
+        const sx = (drag.b - drag.a) / geo.pw, sy = (drag.hi - drag.lo) / geo.ph; trace = null; setView(drag.a - dx * sx, drag.b - dx * sx, drag.lo + dy * sy, drag.hi + dy * sy);
+      };
+      cv.onpointerup = cv.onpointercancel = e => { const p = loc(e); pts.delete(e.pointerId); if (!pts.size) { if (!moved && e.type === 'pointerup') traceAt(...p); drag = null; } };
+      cv.onpointerleave = e => { if (e.pointerType === 'mouse' && !pts.size && trace) { trace = null; paint(); } };
+      cv.onwheel = e => { e.preventDefault(); zoom(Math.exp(e.deltaY * .0015), ...loc(e)); };
+      out.querySelector('.gzoom').onclick = e => {
+        const z = e.target.closest('[data-z]')?.dataset.z; if (!z) return;
+        if (z === 'in') zoom(1 / 1.5); else if (z === 'out') zoom(1.5);
+        else if (z === 'reset') { T.ymin = T.ymax = ''; trace = null; setView(-10, 10); }
+        else { C.wide = !C.wide; save(); calcTable(pane, C); }
+      };
+      $('#gpts').onclick = e => { const d = e.target.closest('[data-pt]'); if (!d || !geo) return; const p = geo.pts[+d.dataset.pt]; trace = { x: p.x, y: p.y, col: p.o.col }; paint(); };
+      const image = kind => new Promise(res => { const c = document.createElement('canvas'); c._k = 2; c.width = 1280; c.height = 800; plotGraph(c, graphModel(T, C), { ...gStyle(kind), legend: true, points: true }); c.toBlob(res, 'image/png'); });
+      const pageKind = () => !currentNote || (currentNote.pcolor || 'dark') === 'dark' ? 'page' : 'light'; // match a dark or a light page
+      $('#gins').onclick = async () => { if (!insertImageIntoNote) return toast('Open a page to insert into it'); try { insertImageIntoNote(await toURL(await image(pageKind())), `Graph of ${T.fs.map((o, i) => `${GNAMES[i]}(X) = ${o.s}`).join(', ')}`); toast('Graph added to the page'); } catch { toast('Fix the functions first'); } };
+      $('#gcopy').onclick = async () => { try { const b = await image('light'); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Graph copied'); } catch { toast("Couldn't copy — use Save PNG"); } };
+      $('#gsave').onclick = async () => { try { dl(await image('light'), 'graph.png'); } catch { toast('Fix the functions first'); } };
+      return;
+    }
     try {
-      if (T.view === 'graph') {
-        out.innerHTML = `<canvas class="cgraph" id="cgv"></canvas><div class="cleg" id="cleg" style="margin:8px 2px"></div><div class="cacts"><button id="gins">${icon('noteplus', 14)} Insert into page</button><button id="gcopy">Copy image</button><button id="gsave">${icon('download', 14)} Save PNG</button></div>`;
-        const cv = $('#cgv'), k = devicePixelRatio || 1; cv._k = k; cv.width = Math.round(cv.clientWidth * k); cv.height = Math.round(cv.clientWidth * 11 / 16 * k);
-        const fns = plotGraph(cv, T, C, gStyle('panel'));
-        $('#cleg').innerHTML = fns.map(o => `<span><i style="background:${o.col}"></i>${o.n}(X) = ${esc(o.s)}</span>`).join('');
-        const image = kind => new Promise(res => { const c = document.createElement('canvas'); c._k = 2; c.width = 1280; c.height = 800; plotGraph(c, T, C, { ...gStyle(kind), legend: true }); c.toBlob(res, 'image/png'); });
-        const pageKind = () => !currentNote || (currentNote.pcolor || 'dark') === 'dark' ? 'page' : 'light'; // match a dark or a light page
-        $('#gins').onclick = async () => { if (!insertImageIntoNote) return toast('Open a page to insert into it'); insertImageIntoNote(await toURL(await image(pageKind())), `Graph of f(X) = ${T.f}`); toast('Graph added to the page'); };
-        $('#gcopy').onclick = async () => { try { const b = await image('light'); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Graph copied'); } catch { toast("Couldn't copy — use Save PNG"); } };
-        $('#gsave').onclick = async () => dl(await image('light'), 'graph.png');
-        return;
-      }
-      const fs = [T.f, T.g].filter(s => s?.trim()).map(s => calcParse(s)), a = calcEval(T.a), b = calcEval(T.b), s = calcEval(T.s);
-      if (!fs.length) throw CalcErr('Type f(X) to make a table');
-      if (s <= 0 || b < a) throw CalcErr('Use Start ≤ End and a positive Step');
-      const n = Math.floor((b - a) / s + 1e-9) + 1; if (n > 200) throw CalcErr('Too many rows — use a bigger step (max 200)');
-      const cell = (f, x) => { try { const y = f({ vars: C.vars, ans: C.ans, X: x }); return Number.isFinite(y) ? esc(calcShow(y)) : 'ERROR'; } catch { return 'ERROR'; } };
-      out.innerHTML = `<div class="cres2" style="padding:4px 10px"><table class="ctab"><tr><th>X</th><th>f(X)</th>${fs[1] ? '<th>g(X)</th>' : ''}</tr>${Array.from({ length: n }, (_, i) => { const x = +(a + i * s).toPrecision(12); return `<tr><td>${esc(calcFmt(x))}</td>${fs.map(f => `<td>${cell(f, x)}</td>`).join('')}</tr>`; }).join('')}</table></div>`;
+      const Mt = graphModel({ ...T, ymin: '', ymax: '' }, C), s = calcEval(T.s ?? '1');
+      if (s <= 0) throw CalcErr('Use a positive Step');
+      const n = Math.floor((Mt.b - Mt.a) / s + 1e-9) + 1; if (n > 200) throw CalcErr('Too many rows — use a bigger step (max 200)');
+      out.innerHTML = `<div class="cres2" style="padding:4px 10px"><table class="ctab"><tr><th>X</th>${Mt.fns.map(o => `<th>${o.n}(X)</th>`).join('')}</tr>${Array.from({ length: n }, (_, i) => { const x = +(Mt.a + i * s).toPrecision(12); return `<tr><td>${esc(calcFmt(x))}</td>${Mt.fns.map(o => { const y = o.at(x); return `<td>${Number.isFinite(y) ? esc(calcShow(y)) : 'ERROR'}</td>`; }).join('')}</tr>`; }).join('')}</table></div>`;
     } catch (e) { out.innerHTML = `<div class="cres2">${cErr(e)}</div>`; }
   };
-  pane.querySelectorAll('[data-k]').forEach(i => i.oninput = () => { T[i.dataset.k] = i.value; save(); draw(); });
-  $('#tview').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; T.view = b.dataset.v; save(); pane.querySelectorAll('#tview button').forEach(x => x.classList.toggle('on', x === b)); draw(); };
+  const rerender = () => { save(); calcTable(pane, C); };
+  pane.querySelectorAll('[data-f]').forEach(i => i.oninput = () => { T.fs[+i.dataset.f].s = i.value; save(); if (gParams(T).join() !== params.join()) { const pos = i.selectionStart; rerender(); const n = pane.querySelector(`[data-f="${i.dataset.f}"]`); n.focus(); n.setSelectionRange(pos, pos); } else T.view === 'graph' ? paint() : draw(); });
+  pane.querySelectorAll('[data-k]').forEach(i => i.oninput = () => { T[i.dataset.k] = i.value; T.moved = true; save(); T.view === 'graph' ? paint() : draw(); });
+  pane.querySelectorAll('[data-p]').forEach(r => r.oninput = () => { T.pv[r.dataset.p] = +r.value; pane.querySelector(`[data-pv="${r.dataset.p}"]`).value = +(+r.value).toPrecision(6); clearTimeout(T._t); T._t = setTimeout(save, 400); T.view === 'graph' ? paint() : draw(); });
+  pane.querySelectorAll('[data-pv]').forEach(i => i.onchange = () => { const n = i.dataset.pv; let v; try { v = calcEval(i.value); } catch { return; } T.pv[n] = v; const r = T.pr[n] ||= { min: -10, max: 10 }; if (v < r.min) r.min = Math.floor(v); if (v > r.max) r.max = Math.ceil(v); rerender(); });
+  pane.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => { const o = T.fs[+b.dataset.tog]; o.off = !o.off; rerender(); });
+  pane.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { T.fs.splice(+b.dataset.rm, 1); rerender(); });
+  if ($('#gadd')) $('#gadd').onclick = () => { T.fs.push({ s: '' }); rerender(); pane.querySelector(`[data-f="${T.fs.length - 1}"]`)?.focus(); };
+  $('#tview').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; T.view = b.dataset.v; rerender(); };
   draw();
 }
 const MAN = (t, body) => `<details class="man"><summary>${t}</summary><div>${body}</div></details>`, KX = s => `<code>${esc(s)}</code>`;
@@ -3195,7 +3306,7 @@ function calcSettingsHTML() {
     ${MAN('Constants and unit conversions', `<p>The search box under the display has the fx's <b>40 scientific constants</b> (CODATA 2018) and <b>40 unit conversions</b>. Type what you want, like <i>light</i>, <i>planck</i>, <i>inch</i>, <i>psi</i> or <i>celsius</i>, and pick it (Enter or a tap).</p><p>Constants work like numbers: ${KX('1/√([ε0][μ0])')} = 299792458. Conversions go <b>after</b> a value: ${KX('5 [cm▸in]')} = 1.968503937, ${KX('-31 [°C▸°F]')} = -23.8.</p>`)}
     ${MAN('Equation', `<p>Pick the kind of equation, type the coefficients (they can be expressions like ${KX('1/3')} or ${KX('√2')}) and press <b>Solve</b>.</p><ul><li><b>aX² + bX + c = 0</b>: both roots, complex ones too (−1 + 2i), and the turning point.</li><li><b>aX³ + bX² + cX + d = 0</b>: all three roots.</li><li><b>2 or 3 unknowns</b>: one row per equation, e.g. 2X + 3Y = 8.</li><li><b>Solve for X</b>: any equation like ${KX('X² = 2')} or ${KX('cos(X) = X')}; change the start value to find other solutions.</li></ul><p><b>Insert</b> adds the answer to the open page.</p>`)}
     ${MAN('Stats', `<p>Type one value per line for averages and spread: n, mean x̄, Σx, Σx², σx (population), sx (sample), min, Q1, median, Q3, max. Type <b>x, y</b> pairs on every line to also get ȳ, Σxy and the regression line <b>y = a + bx</b> with its correlation <b>r</b>.</p>`)}
-    ${MAN('Table and graphs', `<p>Type <b>f(X)</b> (and optionally <b>g(X)</b>), a start, an end and a step. <b>Table</b> lists the values; <b>Graph</b> draws the curves over the same range, with axes and a grid.</p><p><b>Insert into page</b> puts the graph into the open page as a picture (it matches a dark or a light page). You can also <b>copy</b> it or <b>save</b> it as a PNG.</p>`)}
+    ${MAN('Table and graphs', `<p>Type up to four functions of X — <b>f, g, h, p</b> (＋ Add function); the coloured dot hides or shows one. <b>Table</b> lists their values from Start to End in steps. <b>Graph</b> draws them.</p><ul><li><b>Limits:</b> set X min / X max, and Y min / Y max (leave Y on <i>auto</i> to fit the curves).</li><li><b>Move around:</b> drag to pan, scroll or pinch to zoom, or use + / −. ⛶ resets to −10…10, ⇤ makes the panel wider.</li><li><b>Trace:</b> hover (or tap) a curve to read its (x, y); it snaps to key points.</li><li><b>Key points:</b> roots, minimums, maximums, y-intercepts and where curves cross are marked and listed under the graph — click one to jump to it.</li><li><b>Sliders:</b> use letters A–F, M or Y in a function (${KX('A·X² + B')}) and a slider appears for each; type a value in its box to go beyond −10…10.</li></ul><p><b>Insert into page</b> puts the graph into the open page as a picture (matching a dark or a light page); you can also <b>copy</b> it or <b>save</b> it as a PNG.</p>`)}
     ${MAN('Math answers in your notes', `<p><b>In notebook pages</b>, type a sum ending in = — ${KX('12*4 + 7 =')} — and the answer appears in grey after it. <b>Tab</b>, <b>Enter</b> or a tap types it in; keep typing to ignore it. A line like ${KX('price = 12')} sets a value you can use further down (${KX('price * 3 =')}). It understands $, thousands commas (1,200) and 3 x 4.</p><p><b>In equations</b> (Alt+=), end the equation with = and its answer shows after it: <code>\\frac{3}{4}+2^3 =</code> → 35/4. It follows the equation as you edit it and isn't saved into the page. Both can be switched off below.</p>`)}
   </section>`;
 }
