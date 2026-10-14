@@ -936,6 +936,12 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
     cur = { id: e.pointerId, touch: e.pointerType === 'touch', t0: performance.now(), erase, removed: [], s: erase ? null : { t: 'pen', c: pen?.c || inkState.color, w: pen?.w || inkState.size, pts: [] } };
     move(e);
   }, true);
+  // iPad: a Pencil touch on an editable page would focus the text and start Scribble (Pencil → typed text).
+  // Cancelling the stylus touch keeps it ink only; pointer events still arrive. "Type only" mode leaves Scribble on.
+  const noScribble = e => {
+    if ((always || inkState.mode !== 'type') && [...e.changedTouches].some(t => t.touchType === 'stylus')) { const shield = e.target.closest?.('[data-noink]'); if (!shield || shield.contains(host)) e.preventDefault(); }
+  };
+  host.addEventListener('touchstart', noScribble, { passive: false, capture: true }); host.addEventListener('touchmove', noScribble, { passive: false, capture: true });
   host.addEventListener('pointermove', move, true);
   const up = e => {
     if (!cur || e.pointerId !== cur.id) return;
