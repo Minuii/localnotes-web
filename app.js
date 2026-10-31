@@ -1,0 +1,3253 @@
+// last 30 errors for "Report a problem"; URLs, keys and file paths are scrubbed so nothing personal leaks
+const ERRS = [];
+const logErr = (...a) => { ERRS.push(`${new Date().toTimeString().slice(0, 8)} ${a.map(x => x?.stack || x?.message || String(x)).join(' ')}`
+  .replace(/file:\/\/\S*\/|[a-z]:\\\S*\\/gi, '').replace(/https?:\/\/\S+|webcal:\/\/\S+/gi, '<url>').replace(/sk-\w+/g, '<key>').slice(0, 400)); ERRS.splice(0, ERRS.length - 30); };
+addEventListener('error', e => logErr(e.error || e.message));
+addEventListener('unhandledrejection', e => logErr('Unhandled:', e.reason));
+const conErr = console.error; console.error = (...a) => { logErr(...a); conErr(...a); };
+const $ = (s, r = document) => r.querySelector(s);
+const main = $('#main');
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+const today = () => ymd(new Date());
+const firstOf = d => new Date(d.getFullYear(), d.getMonth(), 1);
+const plain = h => (h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : new Date(t).toLocaleDateString(LOC); };
+const kb = n => n < 1048576 ? `${Math.max(1, n / 1024 | 0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+const openLink = url => CAP ? void (location.href = url) : window.open(url, '_blank', 'noopener'); // Android hands a page that isn't the app to the browser
+const dl = (blob, name) => { if (CAP) return capSave(blob, name).catch(e => toast(e.message)); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+// desktop app (Electron preload) vs web / iPad build: handwriting recognition, calendar fetching, AI, PowerPoint and updates need the desktop app
+const NATIVE = !!window.native;
+const DESKTOP_ONLY = what => `<p class="webnote">${what} needs the LocalNotes desktop app for Windows — the web / iPad version can't reach it directly (the service blocks requests from web pages).</p>`;
+if (!NATIVE) navigator.storage?.persist?.(); // ask the browser not to evict the notes
+try { const L = JSON.parse(localStorage.getItem('ln-look')); if (L) { for (const k in L.v) document.documentElement.style.setProperty('--' + k, L.v[k]); if (L.bg) { Object.assign(document.body.style, { backgroundImage: L.bg, backgroundSize: L.size }); document.body.classList.add('patterned'); } } } catch { } // the last theme, before the notes load (no flash)
+
+/* ---------- icons (line style) ---------- */
+const ICONS = {
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  left: '<path d="m15 6-6 6 6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', right: '<path d="m9 6 6 6-6 6"/>',
+  noteplus: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 12v6M9 15h6"/>',
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  notes: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
+  tasks: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  files: '<path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 7"/>',
+  calendar: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>',
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  book: '<path d="M5 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5z"/><path d="M9 3v18"/>',
+  folder: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', sparkle: '<path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z"/>',
+  sync: '<path d="M20 11a8 8 0 0 0-14.8-3M4 13a8 8 0 0 0 14.8 3"/><path d="M5 3v5h5M19 21v-5h-5"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+  download: '<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>',
+  bgdots: '<path d="M6 6h.01M12 6h.01M18 6h.01M6 12h.01M12 12h.01M18 12h.01M6 18h.01M12 18h.01M18 18h.01" stroke-width="3"/>',
+  bggrid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  bglines: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18"/>',
+  bgblank: '<rect x="3" y="3" width="18" height="18" rx="2"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  unlock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.7"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
+  layout: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  quote: '<path d="M9 7H6a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1c0 2-1 3-3 3M20 7h-3a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1c0 2-1 3-3 3"/>',
+  speaker: '<path d="M4 10v4h3l5 4V6L7 10H4Z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>',
+  lasso: '<path d="M7 17.5C4.6 16.3 3 14.3 3 12c0-3.9 4-7 9-7s9 3.1 9 7-4 7-9 7c-1.2 0-2.4-.2-3.5-.5"/><circle cx="7" cy="19" r="1.8"/><path d="M5.8 20.3 4 22"/>',
+  marker: '<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',
+  eraser: '<path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L13 19"/><path d="M22 21H7M5 11l9 9"/>',
+  text: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+  fit: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  ul: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  ol: '<path d="M10 6h10M10 12h10M10 18h10M4 4.5l1.5-1V9M3.6 14.6a1.5 1.5 0 1 1 2.5 1.2L3.5 19.5h3"/>',
+  hr: '<path d="M4 12h16"/><path d="M4 6h16M4 18h16" opacity=".35"/>',
+  clear: '<path d="M5 7V5h11v2M10.5 5 8 19M14 14l5 5M19 14l-5 5"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  sticky: '<path d="M15 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"/><path d="M15 21v-6h6"/>',
+  star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
+  question: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.8c0 1.7-2.4 2.1-2.4 3.6M12 16.8h.01"/>',
+  bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
+  bookopen: '<path d="M2 5h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2zM22 5h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>',
+  calc: '<rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M8.5 6h7v3.5h-7z"/><path d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01" stroke-width="2.6"/>',
+  check: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12 3 3 5-6"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'
+};
+const icon = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+$('#aiBtn').innerHTML = icon('sparkle', 24);
+
+/* ---------- storage: app state in one record, file blobs in their own store ---------- */
+let db, S;
+const idb = () => new Promise((res, rej) => {
+  const r = indexedDB.open('localnotes', 2);
+  r.onupgradeneeded = () => { for (const s of ['kv', 'files']) if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s); };
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+const idbGet = (store, key) => new Promise(res => { const q = db.transaction(store).objectStore(store).get(key); q.onsuccess = () => res(q.result); });
+const idbPut = (store, key, val) => new Promise((res, rej) => { const t = db.transaction(store, 'readwrite'); t.objectStore(store).put(val, key); t.oncomplete = res; t.onerror = t.onabort = () => rej(t.error || new Error('Could not write to storage')); }); // a full disk aborts the transaction, it doesn't error
+async function load() {
+  db = await idb();
+  S = await idbGet('kv', 'state') || seed();
+  S.files ||= []; S.ics ||= {}; S.settings.cals ||= []; S.trash ||= []; S.refs ||= []; S.templates ||= []; purgeOldTrash();
+  if (!S.migratedSections) migrateSections();
+  inkState.shapes = S.settings.inkShapes ?? true; applyTheme();
+  S.sections.forEach(s => { const i = OLD_SECTION_COLORS.indexOf(s.color); if (i >= 0) s.color = SECTION_COLORS[i]; }); // muted palette
+}
+// v1 data had notebooks with nested folders; now: notebook -> sections -> pages (OneNote style)
+function migrateSections() {
+  S.sections ||= [];
+  const rootOf = nb => { let r = nb; while (r.parentId) r = S.notebooks.find(n => n.id === r.parentId) || { ...r, parentId: null }; return r; };
+  for (const nb of S.notebooks.filter(n => !n.parentId)) {
+    const sec = { id: uid(), notebookId: nb.id, name: 'Quick Notes', color: SECTION_COLORS[0], order: 0 };
+    S.sections.push(sec); S.notes.forEach(n => { if (n.notebookId === nb.id) n.sectionId = sec.id; });
+  }
+  S.notebooks.filter(n => n.parentId).forEach((f, i) => {
+    const r = rootOf(f); S.sections.push({ id: f.id, notebookId: r.id, name: f.name, color: SECTION_COLORS[(i + 1) % SECTION_COLORS.length], order: i + 1 });
+    S.notes.forEach(n => { if (n.notebookId === f.id) { n.sectionId = f.id; n.notebookId = r.id; } });
+  });
+  S.notebooks = S.notebooks.filter(n => !n.parentId);
+  S.notes.filter(n => !secOf(n.sectionId)).forEach(n => { const s = defaultSection(); n.sectionId = s.id; n.notebookId = s.notebookId; });
+  S.notes.forEach((n, i) => { n.level ||= 0; n.order ??= i; });
+  S.migratedSections = true;
+}
+let saveT;
+// ponytail: rewrites the whole state on each save; split per-record if boards get huge
+const save = () => { clearTimeout(saveT); saveT = setTimeout(flush, IS_WIDGET ? 0 : 300); }; // the mini window sends edits at once so a stale copy never lands after the main window changed
+// one write at a time, so a slower encrypted save can't land after a newer one
+let saveQ = Promise.resolve(), saveFailed = false;
+const writeState = () => saveQ = saveQ.then(async () => {
+  try { await idbPut('kv', 'state', await sealState()); saveFailed = false; bcState(); scheduleSync(); }
+  catch (e) { console.error(e); if (!saveFailed) toast('Could not save — storage may be full. Export a backup from Settings.'); saveFailed = true; }
+});
+const flush = async () => { if (!S) return; if (IS_WIDGET) return bc?.postMessage({ type: 'patch', tasks: S.tasks, events: S.events, scratch: S.scratch }); return writeState(); };
+addEventListener('pagehide', flush);
+document.addEventListener('visibilitychange', () => document.hidden && db && flush()); // iPadOS can kill a backgrounded web app without pagehide
+// called by the main process before the window closes, so the last edit is on disk
+window.flushNow = async () => { clearTimeout(saveT); if (db) await flush(); };
+
+function seed() {
+  const nb = { id: uid(), name: 'My Notebook', parentId: null }, sec = { id: uid(), notebookId: nb.id, name: 'Quick Notes', color: '#9aa5b1', order: 0 };
+  return {
+    notebooks: [nb], sections: [sec], migratedSections: true, tasks: [], events: [], boards: [], files: [], trash: [], refs: [], templates: [], ics: {}, scratch: '',
+    settings: { aiKey: '', aiModel: 'deepseek-chat', cals: [], collapsed: false },
+    notes: [{ id: uid(), title: 'Welcome', notebookId: nb.id, sectionId: sec.id, level: 0, order: 0, paper: 'blank', pcolor: 'dark', created: Date.now(), updated: Date.now(),
+      html: `<p>Everything here is saved locally on this computer. Press <b>F1</b> to see every keyboard shortcut.</p><h2>Notebooks</h2><p>Notebooks hold coloured <b>sections</b> (chapters), sections hold <b>pages</b> and subpages. Headings on a page show up as chapter points in the page list and in the notebook <b>Index</b>. Right-click pages and sections for more options, or drag them to reorder.</p><h2>Math</h2><p>Press <b>Alt+=</b> to insert an equation (on an empty line it becomes a centered block), or type math between dollar signs — inline like <span class="math" data-tex="e^{i\\pi}+1=0"></span>, or a block with double dollars:</p><span class="math" data-display="1" data-tex="\\int_0^1 x^2\\,dx = \\tfrac{1}{3}"></span><h2>Tags &amp; ink</h2><p><input type="checkbox" checked="">&nbsp;Ctrl+1 adds a to-do, Ctrl+2–6 add Important, Question, Remember, Definition and Critical tags.</p><p>Write with your pen right on the page. Scribble back and forth over ink to erase it, and turn on ◯△ to turn rough shapes into clean ones.</p>` }]
+  };
+}
+
+/* ---------- math (KaTeX) ---------- */
+function renderOne(el) {
+  el.contentEditable = 'false';
+  if (window.katex) katex.render(texWithAns(el.dataset.tex), el, { throwOnError: false, displayMode: el.dataset.display === '1' });
+  else el.textContent = `$${el.dataset.tex}$`;
+}
+function renderAllMath() { document.querySelectorAll('.math').forEach(renderOne); }
+function mathChip(tex, display) {
+  const el = document.createElement('span'); el.className = 'math'; el.dataset.tex = tex;
+  if (display) el.dataset.display = '1';
+  renderOne(el); return el;
+}
+function mathify(root) { // turn $..$ / $$..$$ in text into rendered chips
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: n => n.parentElement.closest('pre,code') ? 2 : 1 }), nodes = [];
+  while (w.nextNode()) nodes.push(w.currentNode);
+  for (const n of nodes) {
+    const re = /\$\$([^$]+)\$\$|\$([^$\s](?:[^$]*[^$\s])?)\$/g;
+    if (!re.test(n.data)) continue;
+    re.lastIndex = 0; const f = document.createDocumentFragment(); let i = 0, m;
+    while ((m = re.exec(n.data))) { f.append(n.data.slice(i, m.index), mathChip(m[1] ?? m[2], m[1] != null)); i = re.lastIndex; }
+    f.append(n.data.slice(i)); n.replaceWith(f);
+  }
+}
+
+/* ---------- dialogs (Electron has no window.prompt) ---------- */
+function dialog(html, onSave, onDelete) {
+  const d = $('#dlg'); d.onclose = null;
+  d.innerHTML = `<form>${html}<div class="row">${onDelete ? '<button type="button" class="del">Delete</button>' : ''}<span style="flex:1"></span><button type="button" class="cancel">Cancel</button>${onSave ? '<button class="pri">Save</button>' : ''}</div></form>`;
+  const f = d.firstChild;
+  f.onsubmit = e => { e.preventDefault(); d.close(); onSave(Object.fromEntries(new FormData(f))); };
+  f.querySelector('.cancel').onclick = () => d.close();
+  if (onDelete) f.querySelector('.del').onclick = () => { d.close(); onDelete(); };
+  d.showModal(); f.querySelector('input,textarea')?.focus();
+}
+function ask(label, value = '', tex = false) {
+  return new Promise(res => {
+    const d = $('#dlg'); let done = false;
+    const fin = v => { if (done) return; done = true; d.close(); res(v); };
+    d.innerHTML = `<form><label>${esc(label)}</label>${tex ? `<textarea name="v" rows="3" style="font-family:Consolas,monospace">${esc(value)}</textarea><div class="prev"></div><small>Enter to insert · Shift+Enter for a new line</small>` : `<input name="v" value="${esc(value)}">`}<div class="row"><span style="flex:1"></span><button type="button" class="cancel">Cancel</button><button class="pri">OK</button></div></form>`;
+    const f = d.firstChild, prev = f.querySelector('.prev');
+    const draw = () => prev && window.katex && katex.render(texWithAns(f.v.value) || ' ', prev, { throwOnError: false, displayMode: true });
+    f.v.oninput = draw; draw();
+    if (tex) prev.after(texPalette(f.v, draw)); // searchable symbol dictionary
+    if (tex) f.v.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fin(f.v.value); } };
+    f.onsubmit = e => { e.preventDefault(); fin(f.v.value); };
+    f.querySelector('.cancel').onclick = () => fin(null);
+    d.onclose = () => fin(null);
+    d.showModal(); f.v.select();
+  });
+}
+
+/* ---------- ink layer: pen + typing on notes, markdown and slides ---------- */
+const INK_COLORS = ['#4aa3ff', '#e8e8e8', '#111111', '#e53935', '#43a047', '#fbc02d'];
+const inkState = { mode: 'pen', tool: 'pen', color: '#4aa3ff', size: 3, shapes: true, scratch: true };
+const toggleShapes = () => { inkState.shapes = S.settings.inkShapes = !inkState.shapes; save(); }; // ink-to-shape is on by default; the choice is remembered // mode: type | pen (stylus draws) | draw (everything draws)
+const liveInkGroups = new Set();
+let boardSync = null;
+const refreshInkUI = () => { liveInkGroups.forEach(g => g.bar.isConnected ? g.sync() : liveInkGroups.delete(g)); boardSync?.(); };
+
+/* smart ink: scribble-out erases, rough shapes snap to clean ones */
+const segDist = ([px, py], [ax, ay], [bx, by]) => { const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L)) : 0; return Math.hypot(px - ax - t * dx, py - ay - t * dy); };
+function rdp(pts, eps) { // Ramer–Douglas–Peucker simplification
+  if (pts.length < 3) return pts;
+  let dmax = 0, idx = 0; for (let i = 1; i < pts.length - 1; i++) { const d = segDist(pts[i], pts[0], pts.at(-1)); if (d > dmax) { dmax = d; idx = i; } }
+  return dmax > eps ? [...rdp(pts.slice(0, idx + 1), eps).slice(0, -1), ...rdp(pts.slice(idx), eps)] : [pts[0], pts.at(-1)];
+}
+function smartInk(stroke, list, minShape = 0) { // -> { erase: [strokes] } | { shape: pts } | null; minShape: smallest size (stroke units) that snaps, so handwriting stays
+  const P = stroke.pts, pts = []; for (let i = 0; i < P.length; i += 3) pts.push([P[i], P[i + 1]]);
+  if (pts.length < 8) return null;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const w = x1 - x0, h = y1 - y0, diag = Math.hypot(w, h); let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  if (diag < 12) return null;
+  if (inkState.scratch) { // many back-and-forth reversals along the long axis, over existing ink
+    const simp = rdp(pts, diag * .05), ax = w >= h ? 0 : 1; let rev = 0, sign = 0;
+    for (let i = 1; i < simp.length; i++) { const d = simp[i][ax] - simp[i - 1][ax]; if (Math.abs(d) < diag * .08) continue; const s = Math.sign(d); if (sign && s !== sign) rev++; sign = s; }
+    if (rev >= 4 && L > 3 * Math.max(w, h)) {
+      const pad = 6, inside = s => { let n = 0, c = 0; for (let i = 0; i < s.pts.length; i += 3) { c++; if (s.pts[i] >= x0 - pad && s.pts[i] <= x1 + pad && s.pts[i + 1] >= y0 - pad && s.pts[i + 1] <= y1 + pad) n++; } return c && n / c >= .3; };
+      const hits = list.filter(s => s !== stroke && inside(s));
+      if (hits.length) return { erase: hits };
+    }
+  }
+  if (!inkState.shapes || diag < minShape) return null;
+  const flat = q => q.flatMap(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10, .5]);
+  const gap = Math.hypot(pts[0][0] - pts.at(-1)[0], pts[0][1] - pts.at(-1)[1]);
+  if (gap > diag * .25) return gap > L * .93 ? { shape: flat([pts[0], pts.at(-1)]) } : null; // open stroke: only a straight line snaps
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = w / 2 || 1, ry = h / 2 || 1;
+  const err = pts.reduce((a, [x, y]) => a + Math.abs(Math.hypot((x - cx) / rx, (y - cy) / ry) - 1), 0) / pts.length;
+  if (err < .12) { const r = Math.abs(rx - ry) / Math.max(rx, ry) < .15 ? (rx + ry) / 2 : 0; return { shape: flat(Array.from({ length: 73 }, (_, i) => { const a = i / 72 * Math.PI * 2; return [cx + (r || rx) * Math.cos(a), cy + (r || ry) * Math.sin(a)]; })) }; }
+  let far = 0; pts.forEach((p, i) => { if (Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]) > Math.hypot(pts[far][0] - pts[0][0], pts[far][1] - pts[0][1])) far = i; });
+  const v = [...rdp(pts.slice(0, far + 1), diag * .07).slice(0, -1), ...rdp(pts.slice(far), diag * .07).slice(0, -1)];
+  if (v.length === 4 && v.every((p, i) => { const q = v[(i + 1) % 4], a = Math.abs(Math.atan2(q[1] - p[1], q[0] - p[0])) % (Math.PI / 2); return Math.min(a, Math.PI / 2 - a) < .22; }))
+    return { shape: flat([[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]) }; // axis-aligned rectangle
+  if (v.length === 3 || v.length === 4) return { shape: flat([...v, v[0]]) }; // triangle / quadrilateral
+  return null;
+}
+const inkBar = () => `<span class="inkbar"><select class="ink-mode" title="What draws"><option value="type">⌨ Type only</option><option value="pen">✒ Stylus draws</option><option value="draw">✒ Draw (all input)</option></select><button data-ink-tool="pen" title="Pen">✒</button><button data-ink-tool="eraser" title="Eraser (pen eraser end also works)">⌫</button><button data-ink-tool="lasso" title="Lasso: circle ink to move, resize, recolour, copy or delete it">${icon('lasso', 15)}</button>${INK_COLORS.map(c => `<button class="sw" data-ink-col="${c}" style="background:${c}"></button>`).join('')}<input type="range" class="ink-size" min="1" max="12" title="Pen size"><button data-ink="shapes" title="Ink to shape — rough circles, lines, triangles and boxes snap clean (Ctrl+Shift+S)">◯△</button><button data-ink="scratch" title="Scratch-out: scribble back and forth over ink to erase it">✗≈</button>${hwOn() ? '<button data-ink="totext" title="Handwriting to text">Aa</button>' : ''}<button data-ink="undo" title="Undo ink">↶</button><button data-ink="clear" title="Clear ink">Clear</button></span>`;
+function inkGroup(bar) { // one toolbar + undo stack shared by every surface in the view
+  const g = { undo: [], surfaces: [], bar };
+  liveInkGroups.add(g);
+  g.sync = () => {
+    bar.querySelector('[data-ink=shapes]').classList.toggle('on', inkState.shapes); bar.querySelector('[data-ink=scratch]').classList.toggle('on', inkState.scratch);
+    bar.querySelector('.ink-mode').value = inkState.mode; bar.querySelector('.ink-size').value = inkState.size;
+    bar.querySelectorAll('[data-ink-tool]').forEach(b => b.classList.toggle('on', b.dataset.inkTool === inkState.tool));
+    bar.querySelectorAll('[data-ink-col]').forEach(b => b.classList.toggle('on', b.dataset.inkCol === inkState.color));
+    g.surfaces.forEach(s => { s.host.style.touchAction = inkState.mode === 'type' ? '' : 'none'; if (inkState.tool !== 'lasso') s.clearSel?.(); });
+    document.body.dataset.ink = inkState.mode;
+  };
+  bar.onchange = e => { if (e.target.matches('.ink-mode')) inkState.mode = e.target.value; if (e.target.matches('.ink-size')) inkState.size = +e.target.value; g.sync(); };
+  bar.onmousedown = e => { if (e.target.closest('button')) e.preventDefault(); }; // keep the caret where it was
+  bar.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.inkTool) { inkState.tool = b.dataset.inkTool; if (inkState.tool === 'lasso' && inkState.mode === 'type') inkState.mode = 'pen'; }
+    if (b.dataset.inkCol) { inkState.color = b.dataset.inkCol; inkState.tool = 'pen'; }
+    if (b.dataset.ink === 'shapes') toggleShapes();
+    if (b.dataset.ink === 'scratch') inkState.scratch = !inkState.scratch;
+    if (b.dataset.ink === 'totext') (g.onText || (async () => { const t = await recognizeInk(g.surfaces.flatMap(x => x.list())); if (t != null) inkTextDialog(t, 'copy', v => { navigator.clipboard.writeText(v); toast('Text copied'); }); }))();
+    if (b.dataset.ink === 'undo') inkUndo(g);
+    if (b.dataset.ink === 'clear' && g.surfaces.some(s => s.list().length) && confirm('Clear all ink here?'))
+      g.surfaces.forEach(s => { const all = [...s.list()]; if (all.length) { s.apply(all, []); g.undo.push({ s, add: [], del: all }); } });
+    g.sync();
+  };
+  return g;
+}
+// "Stylus draws": ink surfaces keep touch-action:none so the pen never scrolls; a finger scrolls them by hand (with a little glide)
+let penDown = false;
+function touchScroll(e, host) {
+  let sc = host; while (sc && !(sc.scrollHeight > sc.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement;
+  if (!sc) return;
+  const id = e.pointerId; let x = e.clientX, y = e.clientY, t = performance.now(), v = 0;
+  const mv = m => { if (m.pointerId !== id) return; const now = performance.now(), dy = m.clientY - y; sc.scrollTop -= dy; sc.scrollLeft -= m.clientX - x; v = dy / Math.max(1, now - t); x = m.clientX; y = m.clientY; t = now; };
+  const end = m => {
+    if (m.pointerId !== id) return;
+    removeEventListener('pointermove', mv, true); removeEventListener('pointerup', end, true); removeEventListener('pointercancel', end, true);
+    if (performance.now() - t > 80) return; // the finger stopped before lifting
+    const glide = () => { if (Math.abs(v) < .02 || penDown) return; sc.scrollTop -= v * 16; v *= .95; requestAnimationFrame(glide); };
+    requestAnimationFrame(glide);
+  };
+  addEventListener('pointermove', mv, true); addEventListener('pointerup', end, true); addEventListener('pointercancel', end, true);
+}
+// host: element receiving pointer events (scrolls with the canvas); list(): stroke array; unit(): CSS px per stored unit
+function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always = false, pen = null }) { // pen: fixed {c, w} instead of the toolbar's
+  const c = canvas.getContext('2d'), dpr = devicePixelRatio || 1;
+  host.classList.add('inkhost');
+  const maxY = () => list().reduce((m, s) => { for (let i = 1; i < s.pts.length; i += 3) m = Math.max(m, s.pts[i]); return m; }, 0) * unit();
+  size ||= () => { canvas.style.height = '0px'; return [host.clientWidth, Math.max(host.scrollHeight, maxY() + 200)]; };
+  let sel = null; // lasso: { strokes } picked on this surface
+  const boxOf = ss => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const st of ss) for (let i = 0; i < st.pts.length; i += 3) { x0 = Math.min(x0, st.pts[i]); x1 = Math.max(x1, st.pts[i]); y0 = Math.min(y0, st.pts[i + 1]); y1 = Math.max(y1, st.pts[i + 1]); } return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; };
+  const drawSel = () => {
+    if (!sel) return; const b = boxOf(sel.strokes), u = unit(), p = 6 / u;
+    c.save(); c.strokeStyle = c.fillStyle = '#6cb6ff'; c.lineWidth = 1.2 / u; c.setLineDash([6 / u, 4 / u]); c.strokeRect(b.x - p, b.y - p, b.w + 2 * p, b.h + 2 * p);
+    c.beginPath(); c.arc(b.x + b.w + p, b.y + b.h + p, 7 / u, 0, 7); c.fill(); c.restore();
+    placeBar(b);
+  };
+  const redraw = () => { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, canvas.width, canvas.height); const k = dpr * unit(); c.setTransform(k, 0, 0, k, 0, 0); list().forEach(st => drawStroke(c, st)); drawSel(); };
+  const fit = () => { const [w, h] = size(); Object.assign(canvas.style, { width: w + 'px', height: h + 'px' }); canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); redraw(); };
+  const s = { host, list, fit, redraw, apply(rm, add) { const L = list(); rm.forEach(r => { const i = L.indexOf(r); if (i >= 0) L.splice(i, 1); }); L.push(...add); redraw(); save(); } };
+  const clone = st => ({ ...st, pts: [...st.pts] });
+  const placeBar = b => { const bar = document.querySelector('.inksel'); if (!bar) return; const r = canvas.getBoundingClientRect(), u = unit(); bar.style.left = Math.max(8, Math.min(innerWidth - bar.offsetWidth - 8, r.left + b.x * u)) + 'px'; bar.style.top = Math.max(8, r.top + b.y * u - 54) + 'px'; };
+  const swap = (news, olds = sel.strokes) => { s.apply(olds, news); g.undo.push({ s, add: news, del: olds }); g.redo = []; if (news.length) { sel = { strokes: news }; redraw(); } else s.clearSel(); };
+  s.clearSel = () => { if (!sel) return; sel = null; document.querySelector('.inksel')?.remove(); redraw(); };
+  function showBar() {
+    document.querySelector('.inksel')?.remove();
+    const bar = Object.assign(document.createElement('div'), { className: 'inksel' });
+    bar.innerHTML = `<button data-a="dup">Duplicate</button>${INK_COLORS.map(col => `<button class="sw" data-col="${col}" style="background:${col}"></button>`).join('')}${hwOn() ? '<button data-a="text">Aa</button>' : ''}<button data-a="del" title="Delete">${icon('trash', 15)}</button><button data-a="done">Done</button>`;
+    bar.onmousedown = e => e.preventDefault();
+    bar.onclick = async e => {
+      const b = e.target.closest('button'); if (!b || !sel) return;
+      if (b.dataset.col) swap(sel.strokes.map(st => ({ ...clone(st), c: b.dataset.col })));
+      if (b.dataset.a === 'dup') { const add = sel.strokes.map(clone); add.forEach(st => { for (let i = 0; i < st.pts.length; i += 3) { st.pts[i] += 20; st.pts[i + 1] += 20; } }); s.apply([], add); g.undo.push({ s, add, del: [] }); sel = { strokes: add }; redraw(); }
+      if (b.dataset.a === 'del') swap([]);
+      if (b.dataset.a === 'done') s.clearSel();
+      if (b.dataset.a === 'text') { const t = await recognizeInk(sel.strokes); if (t != null) inkTextDialog(t, 'copy', v => { navigator.clipboard.writeText(v); toast('Text copied'); }); }
+    };
+    document.body.append(bar); placeBar(boxOf(sel.strokes));
+  }
+  addEventListener('scroll', () => sel && canvas.isConnected && placeBar(boxOf(sel.strokes)), true);
+  const inPoly = (x, y, P) => { let inn = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > y) !== (P[j][1] > y) && x < (P[j][0] - P[i][0]) * (y - P[i][1]) / (P[j][1] - P[i][1]) + P[i][0]) inn = !inn; return inn; };
+  const pt = v => { const r = canvas.getBoundingClientRect(), u = unit(); return [Math.round((v.clientX - r.left) / u * 10) / 10, Math.round((v.clientY - r.top) / u * 10) / 10]; };
+  let cur = null;
+  const move = e => {
+    if (!cur || e.pointerId !== cur.id) return; e.preventDefault();
+    if (cur.lasso) { const [x, y] = pt(e), a = cur.lasso.at(-1); cur.lasso.push([x, y]); c.save(); c.strokeStyle = '#6cb6ff'; c.lineWidth = 1.2 / unit(); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(x, y); c.stroke(); c.restore(); return; }
+    if (cur.grab) {
+      const [x, y] = pt(e), G = cur.grab; G.moved = true;
+      if (G.scale) { const f = Math.max(.1, Math.max(x - G.b.x, 1) / Math.max(G.b.w, 1)); sel.strokes.forEach((st, k) => { const o = G.olds[k]; st.w = o.w * f; for (let i = 0; i < st.pts.length; i += 3) { st.pts[i] = G.b.x + (o.pts[i] - G.b.x) * f; st.pts[i + 1] = G.b.y + (o.pts[i + 1] - G.b.y) * f; } }); }
+      else { const dx = x - G.x, dy = y - G.y; G.x = x; G.y = y; sel.strokes.forEach(st => { for (let i = 0; i < st.pts.length; i += 3) { st.pts[i] += dx; st.pts[i + 1] += dy; } }); }
+      return redraw();
+    }
+    const evs = e.getCoalescedEvents?.();
+    for (const v of evs?.length ? evs : [e]) {
+      const [x, y] = pt(v);
+      if (cur.erase) {
+        const L = list(), R2 = Math.max(10, inkState.size * 4) ** 2; let hit = false;
+        for (let i = L.length - 1; i >= 0; i--) for (let j = 0; j < L[i].pts.length; j += 3) if ((L[i].pts[j] - x) ** 2 + (L[i].pts[j + 1] - y) ** 2 < R2) { cur.removed.push(L.splice(i, 1)[0]); hit = true; break; }
+        if (hit) redraw();
+      } else {
+        const P = cur.s.pts; P.push(x, y, v.pointerType === 'pen' ? Math.round((v.pressure || .5) * 100) / 100 : .5);
+        if (P.length >= 6) drawStroke(c, { ...cur.s, pts: P.slice(-6) });
+      }
+    }
+  };
+  host.addEventListener('pointerdown', e => {
+    const shield = e.target.closest?.('[data-noink]'); if (shield && !shield.contains(host)) return; // e.g. a sticky note sitting on this slide
+    if (e.pointerType === 'touch' && penDown) { e.preventDefault(); e.stopPropagation(); return; } // palm resting on the screen while the pen writes
+    if (!always && !pen && inkState.tool === 'lasso' && inkState.mode !== 'type' && (e.pointerType !== 'touch' || inkState.mode === 'draw') && e.button === 0) {
+      e.preventDefault(); e.stopPropagation(); try { host.setPointerCapture(e.pointerId); } catch { }
+      g.surfaces.forEach(x => x !== s && x.clearSel?.());
+      const [x, y] = pt(e), u = unit(), p = 12 / u, b = sel && boxOf(sel.strokes), onHandle = b && Math.hypot(x - (b.x + b.w + 6 / u), y - (b.y + b.h + 6 / u)) < 16 / u;
+      if (onHandle || (b && x > b.x - p && x < b.x + b.w + p && y > b.y - p && y < b.y + b.h + p)) {
+        const olds = sel.strokes, news = olds.map(clone), L = list(); olds.forEach((o, i) => L[L.indexOf(o)] = news[i]); sel = { strokes: news };
+        cur = { id: e.pointerId, grab: { olds, b, x, y, scale: onHandle } };
+      } else { s.clearSel(); cur = { id: e.pointerId, lasso: [[x, y]] }; }
+      return;
+    }
+    if (!always && inkState.mode === 'pen' && e.pointerType === 'touch') return touchScroll(e, host);
+    if (!always && e.pointerType === 'touch' && cur?.touch) { // "Draw (all input)": a second finger landing right away means two-finger scroll, not drawing
+      e.preventDefault(); e.stopPropagation();
+      if (performance.now() - cur.t0 > 400) return; // the first finger has been drawing a while: treat this one as a resting hand
+      if (cur.erase) list().push(...cur.removed); cur = null; redraw(); // drop what the first finger started
+      return touchScroll(e, host);
+    }
+    if (!always && (inkState.mode === 'type' || (inkState.mode === 'pen' && e.pointerType !== 'pen'))) return;
+    if (e.button !== 0 && e.button !== 5) return;
+    e.preventDefault(); e.stopPropagation(); try { host.setPointerCapture(e.pointerId); } catch { }
+    const erase = inkState.tool === 'eraser' || e.button === 5 || (e.buttons & 32);
+    penDown = e.pointerType === 'pen';
+    cur = { id: e.pointerId, touch: e.pointerType === 'touch', t0: performance.now(), erase, removed: [], s: erase ? null : { t: 'pen', c: pen?.c || inkState.color, w: pen?.w || inkState.size, pts: [] } };
+    move(e);
+  }, true);
+  // iPad: a Pencil touch on an editable page would focus the text and start Scribble (Pencil → typed text).
+  // Cancelling the stylus touch keeps it ink only; pointer events still arrive. "Type only" mode leaves Scribble on.
+  const noScribble = e => {
+    if ((always || inkState.mode !== 'type') && [...e.changedTouches].some(t => t.touchType === 'stylus')) { const shield = e.target.closest?.('[data-noink]'); if (!shield || shield.contains(host)) e.preventDefault(); }
+  };
+  host.addEventListener('touchstart', noScribble, { passive: false, capture: true }); host.addEventListener('touchmove', noScribble, { passive: false, capture: true });
+  host.addEventListener('pointermove', move, true);
+  const up = e => {
+    if (!cur || e.pointerId !== cur.id) return;
+    if (g.bar) { lastInkG = g; lastInkAt = Date.now(); }
+    if (cur.lasso) {
+      const P = cur.lasso, hits = list().filter(st => { let n = 0, m = 0; for (let i = 0; i < st.pts.length; i += 3) { m++; if (inPoly(st.pts[i], st.pts[i + 1], P)) n++; } return m && n / m >= .6; });
+      cur = null; sel = hits.length ? { strokes: hits } : null; if (sel) showBar(); redraw(); return;
+    }
+    if (cur.grab) { const G = cur.grab; cur = null; if (G.moved) { g.undo.push({ s, add: sel.strokes, del: G.olds }); g.redo = []; save(); } return; }
+    g.redo = [];
+    if (cur.erase) { if (cur.removed.length) { g.undo.push({ s, add: [], del: cur.removed }); save(); } }
+    else if (cur.s.pts.length) {
+      const L = list(), r = smartInk(cur.s, L, 48 / unit());
+      if (r?.erase) { r.erase.forEach(x => L.splice(L.indexOf(x), 1)); g.undo.push({ s, add: [], del: r.erase }); }
+      else { if (r?.shape) cur.s.pts = r.shape; L.push(cur.s); g.undo.push({ s, add: [cur.s], del: [] }); }
+      save(); redraw();
+    }
+    cur = null; penDown = false;
+  };
+  host.addEventListener('pointerup', up, true); host.addEventListener('pointercancel', up, true);
+  g.surfaces.push(s); fit(); g.sync();
+  return s;
+}
+
+/* ---------- handwriting -> text (Windows' built-in recognizer, switch in Settings) ---------- */
+const hwOn = () => !!window.native?.recognize && S?.settings.handwriting !== false;
+async function recognizeInk(strokes) { // -> text with line breaks, or null
+  strokes = strokes.filter(s => s.t !== 'hl' && s.pts.length > 3);
+  if (!strokes.length) { toast('No handwriting to convert'); return null; }
+  toast('Reading your handwriting…');
+  try {
+    const r = await window.native.recognize(strokes.map(s => s.pts));
+    const ws = (r.words || []).map(w => ({ t: [].concat(w.c)[0] || '', x: w.r[0], y: w.r[1], h: w.r[3] || 1 }));
+    const lines = []; // words sharing a vertical band form a line
+    for (const w of ws.sort((a, b) => a.y - b.y)) { const cy = w.y + w.h / 2, L = lines.find(l => Math.abs(l.cy - cy) < Math.max(l.h, w.h) * .6); L ? L.ws.push(w) : lines.push({ cy, h: w.h, ws: [w] }); }
+    const text = lines.sort((a, b) => a.cy - b.cy).map(l => l.ws.sort((a, b) => a.x - b.x).map(w => w.t).join(' ')).join('\n');
+    if (!text.trim()) { toast('No words recognised'); return null; }
+    return text;
+  } catch (e) {
+    alert(`Couldn't read the handwriting: ${errText(e)}\n\nIf this keeps happening, add the "Handwriting" feature for your language: Windows Settings → Time & language → Language & region → your language → Language options.`);
+    return null;
+  }
+}
+function inkTextDialog(text, action, onDone) { // lets you fix the text before it's used
+  dialog(`<h3>Handwriting → text</h3><textarea name="t" rows="6" style="font:15px/1.5 'Segoe UI'">${esc(text)}</textarea>${action === 'copy' ? '' : '<label class="mut" style="font-size:13px"><input type="checkbox" name="keep"> Keep the handwriting too</label>'}`, d => onDone(d.t, !!d.keep));
+  $('#dlg .pri').textContent = action === 'copy' ? 'Copy text' : 'Insert text';
+}
+
+/* ---------- password-locked sections: pages are AES-GCM encrypted at rest, key derived from the password (PBKDF2) ---------- */
+const secKeys = new Map(); // sectionId -> CryptoKey while that section is unlocked
+let lastInput = Date.now();
+addEventListener('pointerdown', () => lastInput = Date.now(), true); addEventListener('keydown', () => lastInput = Date.now(), true);
+const toB64 = buf => { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+const fromB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function deriveKey(pw, salt) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 250000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function encJSON(key, obj) { const iv = crypto.getRandomValues(new Uint8Array(12)); return { iv: toB64(iv), d: toB64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj)))) }; }
+async function decJSON(key, e) { return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(e.iv) }, key, fromB64(e.d)))); }
+const isSealed = s => !!s?.lock && !secKeys.has(s.id);
+const noteSealed = n => isSealed(secOf(n.sectionId));
+const openNotes = () => S.notes.filter(n => !noteSealed(n));
+async function sealState() { // what goes to disk: pages of protected sections only as ciphertext
+  if (!S.sections?.some(s => s.lock) && !S.notes.some(n => n.enc)) return S;
+  const notes = await Promise.all(S.notes.map(async n => {
+    const s = secOf(n.sectionId);
+    if (!s?.lock) { if (!n.enc) return n; const { enc, ...rest } = n; return rest; }
+    const key = secKeys.get(s.id); if (!key || n.enc) return n; // already ciphertext in memory: never encrypt its blank fields over it
+    return { ...n, title: '', html: '', ink: [], enc: await encJSON(key, { title: n.title, html: n.html, ink: n.ink || [] }) };
+  }));
+  return { ...S, notes };
+}
+function protectSection(s) {
+  dialog(`<h3>${icon('lock', 18)} Password protect “${esc(s.name)}”</h3><input type="password" name="p" placeholder="Password" required minlength="4"><input type="password" name="c" placeholder="Confirm password" required><small class="mut">Pages are encrypted on this computer. If you forget the password they can't be recovered.</small>`, async d => {
+    if (d.p !== d.c) return alert("The passwords don't match.");
+    const salt = crypto.getRandomValues(new Uint8Array(16)), key = await deriveKey(d.p, salt);
+    s.lock = { salt: toB64(salt), check: await encJSON(key, 'ok') }; secKeys.set(s.id, key);
+    await window.flushNow(); toast('Section protected — it locks after 10 idle minutes, or use Lock'); route();
+  });
+}
+async function lockSection(s) {
+  const key = secKeys.get(s.id); if (!key) return;
+  for (const n of S.notes.filter(n => n.sectionId === s.id)) { n.enc = await encJSON(key, { title: n.title, html: n.html, ink: n.ink || [] }); n.title = ''; n.html = ''; n.ink = []; }
+  secKeys.delete(s.id); await window.flushNow();
+  if (['nb', 'notes', 'home', ''].includes(view)) route();
+}
+async function unlockSection(s, pw) {
+  let key; try { key = await deriveKey(pw, fromB64(s.lock.salt)); await decJSON(key, s.lock.check); } catch { return false; }
+  for (const n of S.notes.filter(n => n.sectionId === s.id && n.enc)) { try { Object.assign(n, await decJSON(key, n.enc)); delete n.enc; } catch (e) { console.warn('could not open a protected page', e); } } // a damaged page stays encrypted
+  secKeys.set(s.id, key); return true;
+}
+function removeProtection(s) {
+  if (isSealed(s) || !confirm(`Remove the password from “${s.name}”? Its pages will be stored unencrypted again.`)) return;
+  delete s.lock; secKeys.delete(s.id); save(); route();
+}
+setInterval(() => { if (secKeys.size && Date.now() - lastInput > 10 * 60e3) S.sections.filter(s => secKeys.has(s.id)).forEach(lockSection); }, 30e3);
+
+/* ---------- v1.4 (tester feedback): LaTeX dictionary, highlighter, pictures, right-click bar, ink undo, PDF export, zoom, mini window ---------- */
+const LOC = 'en-GB'; // dates read dd/mm/yyyy
+// searchable LaTeX symbols for the equation box: [tex, name/keywords]
+const TEX_DICT = [
+  ['\\frac{a}{b}', 'fraction divide over'], ['\\sqrt{x}', 'square root'], ['\\sqrt[n]{x}', 'nth root cube'], ['x^{2}', 'power exponent squared superscript'], ['x_{i}', 'subscript index'], ['\\pm', 'plus minus'], ['\\times', 'times multiply cross'], ['\\div', 'divide'], ['\\cdot', 'dot multiply'],
+  ['\\neq', 'not equal'], ['\\approx', 'approximately'], ['\\leq', 'less or equal'], ['\\geq', 'greater or equal'], ['\\ll', 'much less'], ['\\gg', 'much greater'], ['\\equiv', 'equivalent identical'], ['\\propto', 'proportional'], ['\\infty', 'infinity'], ['^{\\circ}', 'degree'], ['\\%', 'percent'],
+  ['\\left| x \\right|', 'absolute value modulus'], ['\\left( x \\right)', 'brackets parentheses'], ['\\left[ x \\right]', 'square brackets'], ['\\lfloor x \\rfloor', 'floor'], ['\\lceil x \\rceil', 'ceiling'],
+  ['\\alpha', 'alpha greek'], ['\\beta', 'beta'], ['\\gamma', 'gamma'], ['\\delta', 'delta'], ['\\epsilon', 'epsilon'], ['\\varepsilon', 'epsilon variant'], ['\\theta', 'theta angle'], ['\\lambda', 'lambda wavelength'], ['\\mu', 'mu micro'], ['\\pi', 'pi'], ['\\rho', 'rho density'], ['\\sigma', 'sigma'], ['\\tau', 'tau torque'], ['\\phi', 'phi'], ['\\omega', 'omega angular'], ['\\eta', 'eta efficiency'], ['\\kappa', 'kappa'], ['\\nu', 'nu frequency'], ['\\xi', 'xi'], ['\\chi', 'chi'], ['\\psi', 'psi wave'],
+  ['\\Delta', 'Delta change'], ['\\Sigma', 'Sigma'], ['\\Omega', 'Omega ohm'], ['\\Gamma', 'Gamma'], ['\\Theta', 'Theta'], ['\\Lambda', 'Lambda'], ['\\Pi', 'Pi product'], ['\\Phi', 'Phi flux'], ['\\Psi', 'Psi'],
+  ['\\int_{a}^{b} f(x)\\,dx', 'integral definite'], ['\\int f(x)\\,dx', 'integral indefinite'], ['\\iint', 'double integral'], ['\\oint', 'contour line integral'], ['\\frac{d}{dx}', 'derivative'], ['\\frac{dy}{dx}', 'derivative dy dx'], ['\\frac{\\partial f}{\\partial x}', 'partial derivative'], ['\\lim_{x \\to 0}', 'limit'], ['\\sum_{i=1}^{n}', 'sum sigma series'], ['\\prod_{i=1}^{n}', 'product'], ['\\nabla', 'nabla gradient del'], ['\\dot{x}', 'dot derivative time'], ['\\ddot{x}', 'double dot acceleration'], ["f'(x)", 'prime derivative'],
+  ['\\vec{v}', 'vector arrow'], ['\\hat{x}', 'hat unit vector'], ['\\bar{x}', 'bar mean average'], ['\\overline{AB}', 'overline segment'], ['\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}', 'matrix 2x2'], ['\\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix}', 'determinant'], ['\\begin{cases} x & x \\ge 0 \\\\ -x & x < 0 \\end{cases}', 'cases piecewise'], ['\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}', 'aligned equations'],
+  ['\\in', 'element of in'], ['\\notin', 'not in'], ['\\subset', 'subset'], ['\\subseteq', 'subset equal'], ['\\cup', 'union'], ['\\cap', 'intersection'], ['\\emptyset', 'empty set'], ['\\forall', 'for all'], ['\\exists', 'exists'], ['\\neg', 'not negation'], ['\\land', 'and logic'], ['\\lor', 'or logic'],
+  ['\\mathbb{R}', 'real numbers'], ['\\mathbb{N}', 'natural numbers'], ['\\mathbb{Z}', 'integers'], ['\\mathbb{Q}', 'rationals'], ['\\mathbb{C}', 'complex numbers'],
+  ['\\to', 'arrow right tends'], ['\\Rightarrow', 'implies'], ['\\Leftrightarrow', 'if and only if iff'], ['\\leftarrow', 'arrow left'], ['\\rightleftharpoons', 'equilibrium chemistry reversible'], ['\\uparrow', 'up arrow'], ['\\downarrow', 'down arrow'], ['\\mapsto', 'maps to'],
+  ['\\sin', 'sine trig'], ['\\cos', 'cosine'], ['\\tan', 'tangent'], ['\\sin^{-1}', 'arcsin inverse'], ['\\log', 'log logarithm'], ['\\ln', 'natural log'], ['\\log_{b}', 'log base'], ['e^{x}', 'exponential'],
+  ['\\mathrm{H_2O}', 'chemistry formula water'], ['\\hbar', 'h bar planck'], ['\\angle', 'angle'], ['\\perp', 'perpendicular'], ['\\parallel', 'parallel'], ['\\triangle', 'triangle'], ['\\therefore', 'therefore'], ['\\because', 'because'], ['\\text{text}', 'words text'], ['\\quad', 'space gap'], ['\\cancel{x}', 'cancel cross out']
+];
+function texPalette(ta, draw) { // search box + clickable symbols under the equation box
+  const box = document.createElement('div'); box.className = 'texdict';
+  box.innerHTML = `<input class="tdq" placeholder="Search symbols — fraction, integral, alpha, matrix…"><div class="tdgrid"></div>`;
+  const grid = box.querySelector('.tdgrid'), q = box.querySelector('.tdq');
+  const show = () => {
+    const s = q.value.trim().toLowerCase(), hits = TEX_DICT.filter(([t, n]) => !s || n.includes(s) || t.toLowerCase().includes(s)).slice(0, s ? 60 : 36);
+    grid.innerHTML = hits.map(([t, n]) => `<button type="button" data-t="${esc(t)}" title="${esc(n.split(' ')[0])}: ${esc(t)}">${window.katex ? katex.renderToString(t.replace(/\{([a-z])\}/g, '{$1}'), { throwOnError: false }) : esc(t)}</button>`).join('') || '<small class="mut">No match</small>';
+  };
+  q.oninput = show; q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); grid.querySelector('button')?.click(); } };
+  grid.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const t = b.dataset.t, s = ta.selectionStart, end = ta.selectionEnd;
+    ta.setRangeText(t, s, end, 'end');
+    const brace = t.indexOf('{'); if (brace >= 0) ta.setSelectionRange(s + brace + 1, s + t.indexOf('}', brace)); // select the first placeholder
+    ta.focus(); draw();
+  };
+  show(); return box;
+}
+// highlighter colours (translucent so text stays readable on light and dark pages)
+const HL_COLORS = [['Yellow', '#facc1580'], ['Green', '#4ade8070'], ['Pink', '#f472b670'], ['Blue', '#60a5fa70'], ['Orange', '#fb923c70']];
+// draw on a picture: returns a new image (data URL) or null
+function annotateImage(src) {
+  return new Promise(async res => {
+    const im = await loadImg(src); if (!im) return res(null);
+    const d = $('#dlg'), sc = Math.min(1, 860 / im.naturalWidth, (innerHeight * .68) / im.naturalHeight), W = Math.round(im.naturalWidth * sc), H = Math.round(im.naturalHeight * sc);
+    const penOpt = { c: '#e53935', w: 3 }, g = { undo: [], redo: [], surfaces: [], sync() { } }, strokes = [];
+    d.onclose = null; d.classList.add('wide');
+    d.innerHTML = `<form class="anno"><div class="row"><b style="flex:1">Draw on picture</b>${['#e53935', '#111111', '#1e5bd8', '#2e7d32', '#fbc02d', '#ffffff'].map(c => `<button type="button" class="sw${c === penOpt.c ? ' on' : ''}" data-c="${c}" style="background:${c}"></button>`).join('')}<input type="range" min="1" max="14" value="3" class="asz" title="Pen size"><button type="button" data-a="undo" title="Undo">${icon('undo', 16)}</button><button type="button" data-a="clear">Clear</button></div>
+      <div class="astage" style="width:${W}px;height:${H}px"><img src="${src}" style="width:${W}px;height:${H}px"><canvas class="ink"></canvas></div>
+      <div class="row"><small class="mut" style="flex:1">Draw with the pen or mouse.</small><button type="button" class="cancel">Cancel</button><button class="pri">Save picture</button></div></form>`;
+    const f = d.firstChild, stage = f.querySelector('.astage');
+    const ink = attachInk(g, { host: stage, canvas: stage.querySelector('canvas'), list: () => strokes, save: () => { }, always: true, pen: penOpt, size: () => [W, H] });
+    const fin = v => { d.classList.remove('wide'); d.close(); res(v); };
+    f.onclick = e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.c) { penOpt.c = b.dataset.c; f.querySelectorAll('[data-c]').forEach(x => x.classList.toggle('on', x === b)); }
+      if (b.dataset.a === 'undo') { const op = g.undo.pop(); op?.s.apply(op.add, op.del); }
+      if (b.dataset.a === 'clear' && strokes.length) ink.apply([...strokes], []);
+    };
+    f.querySelector('.asz').oninput = e => penOpt.w = +e.target.value;
+    f.querySelector('.cancel').onclick = () => fin(null);
+    d.onclose = () => fin(null);
+    f.onsubmit = e => {
+      e.preventDefault(); if (!strokes.length) return fin(null);
+      const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      const x = c.getContext('2d'); x.drawImage(im, 0, 0); x.scale(1 / sc, 1 / sc); strokes.forEach(s => drawStroke(x, s));
+      fin(c.toDataURL(/^data:image\/png/.test(src) ? 'image/png' : 'image/jpeg', .9));
+    };
+    d.showModal();
+  });
+}
+// ink undo/redo with Ctrl+Z / Ctrl+Y: applies to the last surface you drew on, unless you typed since
+let lastInkG = null, lastInkAt = 0, lastTypeAt = 0;
+addEventListener('input', () => lastTypeAt = Date.now(), true);
+const inkUndo = g => { g.surfaces.forEach(x => x.clearSel?.()); const op = g.undo.pop(); if (!op) return toast('Nothing to undo'); op.s.apply(op.add, op.del); (g.redo ||= []).push(op); };
+const inkRedo = g => { g.surfaces.forEach(x => x.clearSel?.()); const op = g.redo?.pop(); if (!op) return; op.s.apply(op.del, op.add); g.undo.push(op); };
+// printable HTML for a page: rendered math, tags, pictures, ink drawn on top
+function pageExportHTML(p) {
+  const d = document.createElement('div'); d.innerHTML = p.html || '';
+  d.querySelectorAll('.math').forEach(m => { if (window.katex) katex.render(m.dataset.tex, m, { throwOnError: false, displayMode: m.dataset.display === '1' }); });
+  d.querySelectorAll('.ntag').forEach(t => { if (NTAGS[t.dataset.tag]) t.innerHTML = icon(NTAGS[t.dataset.tag].ic, 14); });
+  d.querySelectorAll('input[type=checkbox]').forEach(c => c.replaceWith(document.createTextNode(c.hasAttribute('checked') ? '☑ ' : '☐ ')));
+  let ink = '';
+  if (p.ink?.length) {
+    const bb = boundsOf(p.ink.map(s => ({ k: 'ink', ...s }))), c = document.createElement('canvas'), k = 2;
+    c.width = Math.ceil((bb.x + bb.w + 20) * k); c.height = Math.ceil((bb.y + bb.h + 20) * k);
+    const x = c.getContext('2d'); x.scale(k, k); p.ink.forEach(s => drawStroke(x, { ...s, c: /^#(e8e8e8|ececec|ffffff)$/i.test(s.c) ? '#222222' : s.c }));
+    ink = `<img class="inkimg" src="${c.toDataURL()}" style="width:${c.width / k}px">`;
+  }
+  return `<section class="pg"><h1>${esc(p.title || 'Untitled page')}</h1><div class="meta">${new Date(p.created).toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="content">${d.innerHTML}${ink}</div></section>`;
+}
+async function exportPdf(name, inner) {
+  const css = `body{font:15px/1.6 "Segoe UI",system-ui,sans-serif;color:#1d1d1d;margin:0}.pg{page-break-after:always}.pg:last-child{page-break-after:auto}h1{font-size:26px;margin:0 0 4px}.meta{color:#777;font-size:12px;margin-bottom:14px}.content{position:relative;padding:0 2px}.content img{max-width:100%}.content img.inkimg{position:absolute;left:0;top:0;max-width:none}.sec{font-size:30px;border-bottom:2px solid #ccc;padding-bottom:6px;margin-bottom:18px}pre{background:#f3f3f3;padding:8px;border-radius:6px;white-space:pre-wrap}blockquote{border-left:3px solid #aaa;margin:0;padding-left:10px;color:#555}.ntag{display:inline-flex;vertical-align:-2px;margin-right:4px;color:#666}.ntag svg{width:14px;height:14px}.math[data-display="1"]{display:block;text-align:center;margin:8px 0}table{border-collapse:collapse;width:100%;margin:8px 0}td,th{border:1px solid #aaa;padding:5px 8px;text-align:left;vertical-align:top}.ref{padding-left:2em;text-indent:-2em}`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)}</title><link rel="stylesheet" href="${new URL('./lib/katex/dist/katex.min.css', location.href).href}"><style>${css}</style></head><body>${inner}</body></html>`;
+  if (window.native?.exportPdf) { toast('Making PDF…'); if (await window.native.exportPdf(name, html)) toast('PDF saved'); return; }
+  const fr = Object.assign(document.createElement('iframe'), { srcdoc: html }); fr.style.cssText = 'position:fixed;width:0;height:0;border:0';
+  fr.onload = () => { fr.contentWindow.print(); setTimeout(() => fr.remove(), 60000); }; document.body.append(fr); // iPad: Print → Save to Files as PDF
+}
+const exportPages = (name, pages) => exportPdf(name, pages.filter(p => !noteSealed(p)).map(pageExportHTML).join('') || '<p>Nothing to export.</p>');
+function exportNotebook(nb) {
+  exportPdf(nb.name, sectionsOf(nb.id).filter(s => !isSealed(s)).map(s => { const ps = pagesOf(s.id); return ps.length ? `<h1 class="sec">${esc(s.name)}</h1>${ps.map(pageExportHTML).join('')}` : ''; }).join('') || '<p>Nothing to export.</p>');
+}
+// AI spelling & grammar fix for a piece of text (needs the DeepSeek key)
+// spelling & grammar, no AI key: LanguageTool's free service (the text you fix is sent to languagetool.org, no account),
+// or, offline / if that fails, this computer's spell-check dictionary (spelling only). Returns [{ at, len, rep }]
+async function grammarFixes(text) {
+  try {
+    const r = await fetch('https://api.languagetool.org/v2/check', { method: 'POST', signal: AbortSignal.timeout(10000), body: new URLSearchParams({ text, language: 'auto', preferredVariants: 'en-GB' }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return (await r.json()).matches.filter(m => m.replacements.length && !['style', 'typographical'].includes(m.rule?.issueType)).map(m => ({ at: m.offset, len: m.length, rep: m.replacements[0].value }));
+  } catch (e) {
+    if (!window.native?.spellSuggest) { toast('Spelling & grammar needs an internet connection'); return null; }
+    const words = [...text.matchAll(/\p{L}+(?:'\p{L}+)*/gu)], sug = window.native.spellSuggest(words.map(w => w[0]));
+    toast('Offline: fixed spelling only');
+    return words.flatMap((w, k) => sug[k] ? [{ at: w.index, len: w[0].length, rep: sug[k] }] : []);
+  }
+}
+// right-click in a page: format bar + spelling. Electron sends the spellchecker's suggestions with each right-click
+let pageCtx = null; // set by the open page editor: (x, y, spell) => shows its menu
+window.native?.onCtx?.(p => {
+  const z = window.zoomFactor || 1, x = p.x / z, y = p.y / z, el = document.elementFromPoint(x, y);
+  if (pageCtx && el?.closest('#body')) return pageCtx(x, y, p);
+  if (!p.editable) return;
+  const items = [...(p.word ? [...(p.suggestions || []).slice(0, 5).map(s => [`<b>${esc(s)}</b>`, () => window.native.spellFix(s)]), [`Add “${esc(p.word)}” to dictionary`, () => window.native.spellAdd(p.word)], '-'] : []),
+    ['Cut', () => document.execCommand('cut')], ['Copy', () => document.execCommand('copy')], ['Paste', () => window.native.paste()]];
+  ctxMenu({ preventDefault() { }, clientX: x, clientY: y }, items);
+});
+// zoom the whole app (Electron); the PDF and whiteboard views have their own zoom
+async function appZoom(step) { if (!window.native?.zoom) return; window.zoomFactor = await window.native.zoom(step); toast(`Zoom ${Math.round(window.zoomFactor * 100)}%`); }
+addEventListener('wheel', e => { if (e.ctrlKey && !e.defaultPrevented && window.native?.zoom) { e.preventDefault(); appZoom(e.deltaY < 0 ? 1 : -1); } }, { passive: false });
+// mini window: it keeps no state of its own on disk — edits go to the main window, which saves and sends updates back
+const IS_WIDGET = location.hash.startsWith('#/widget');
+const bc = 'BroadcastChannel' in window ? new BroadcastChannel('localnotes') : null;
+const WIDGET_KEYS = ['tasks', 'events', 'scratch'];
+const bcState = () => bc?.postMessage({ type: 'state', tasks: S.tasks, events: S.events, scratch: S.scratch, ics: S.ics, cals: S.settings.cals });
+if (bc) bc.onmessage = ({ data: m }) => {
+  if (!S) return;
+  if (IS_WIDGET && m.type === 'state') {
+    const typing = document.activeElement?.matches('input,textarea');
+    Object.assign(S, { tasks: m.tasks, events: m.events, ics: m.ics }); S.settings.cals = m.cals; if (!typing) S.scratch = m.scratch;
+    if (!typing) viewWidget();
+  }
+  if (!IS_WIDGET && m.type === 'hello') bcState();
+  if (!IS_WIDGET && m.type === 'patch') {
+    WIDGET_KEYS.forEach(k => { if (k in m) S[k] = m[k]; }); save();
+    if (['home', 'tasks', 'calendar', ''].includes(view) && !document.activeElement?.matches('input,textarea,[contenteditable=true]')) route();
+  }
+};
+function viewWidget() {
+  document.body.classList.add('widget');
+  const T = today(), open = S.tasks.filter(t => !t.done).sort(byDue);
+  main.innerHTML = `<div class="wgt"><div class="row"><span class="hico" style="width:34px;height:34px">${icon('home', 17)}</span><div class="htitle" style="flex:1"><b>${new Date().toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long' })}</b><small>${open.length} open task${open.length === 1 ? '' : 's'}</small></div></div>
+    <h3>Tasks</h3><form class="row" style="flex-wrap:nowrap"><input name="t" placeholder="Quick task…" style="flex:1;min-width:0"><input type="date" name="d" value="${T}" style="width:128px"><button>Add</button></form><div class="wlist"></div>
+    <h3>Today</h3><div class="wtoday">${dayItems(T) || '<p class="mut" style="margin:0">Nothing scheduled.</p>'}</div>
+    <h3>Scratch pad</h3><textarea class="wscratch" placeholder="Start writing…">${esc(S.scratch || '')}</textarea></div>`;
+  const list = main.querySelector('.wlist'), draw = () => { list.innerHTML = taskRows(S.tasks.filter(t => !t.done).sort(byDue).slice(0, 12)) || '<p class="mut">Nothing to do</p>'; };
+  bindTasks(list, draw); addTaskForm(main.querySelector('form'), draw); draw();
+  main.querySelector('.wtoday').onclick = itemClick;
+  const sc = main.querySelector('.wscratch'); sc.oninput = () => { S.scratch = sc.value; save(); };
+}
+
+/* ---------- routing ---------- */
+let viewKey = null, currentNote = null, currentFileText = null, insertIntoNote = null, insertImageIntoNote = null, view = 'home';
+document.addEventListener('keydown', e => viewKey?.(e));
+let viewKeyUp = null, viewPaste = null;
+document.addEventListener('keyup', e => viewKeyUp?.(e));
+document.addEventListener('paste', e => viewPaste?.(e));
+addEventListener('hashchange', route);
+let sideArgs = [];
+function route() {
+  closePdf(); document.querySelector('.inksel')?.remove(); if (tts.btn && location.hash !== tts.hash) stopSpeech();
+  viewKey = viewKeyUp = viewPaste = currentNote = currentFileText = insertIntoNote = insertImageIntoNote = boardSync = pageCtx = null;
+  const [v = 'home', a, b, c] = location.hash.replace(/^#\/?/, '').split('/'); view = v;
+  ({ widget: viewWidget, home: viewHome, notes: () => viewNotes(null, a), nb: () => viewNotebook(a, b, c), tasks: viewTasks, files: () => viewFiles(a),
+     calendar: viewCalendar, boards: viewBoards, trash: viewTrash, board: () => viewBoard(a), settings: () => viewSettings(a) }[v] || viewHome)();
+  renderSide(v, a, b);
+  $('#kbdTab').hidden = v !== 'home' && v !== '';
+  if (!$('#ai').hidden) drawAI();
+}
+
+/* ---------- notebooks: notebook -> sections -> pages ---------- */
+const SECTION_COLORS = ['#9aa5b1', '#7f93ab', '#8fa08b', '#ab9d80', '#ab8a8a', '#9b8cab', '#82a6a0', '#8a8a8a']; // muted tints
+const OLD_SECTION_COLORS = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#94a3b8'];
+let curSection = null;
+const nbFlat = () => S.notebooks.map(n => [n, 0]);
+const nbDesc = id => [id];
+const nbName = id => S.notebooks.find(n => n.id === id)?.name || 'No notebook';
+const secOf = id => S.sections?.find(s => s.id === id);
+const sectionsOf = nbId => S.sections.filter(s => s.notebookId === nbId).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+const pagesOf = secId => S.notes.filter(n => n.sectionId === secId).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+const pageHref = p => `#/nb/${p.notebookId}/${p.sectionId}/${p.id}`;
+const headingsOf = p => [...(p.html || '').matchAll(/<h([1-3])[^>]*>([\s\S]*?)<\/h\1>/g)].map((m, i) => ({ lv: +m[1], text: plain(m[2]), i })).filter(h => h.text);
+function addSection(nb, name) {
+  const s = { id: uid(), notebookId: nb.id, name, color: SECTION_COLORS[sectionsOf(nb.id).length % SECTION_COLORS.length], order: Date.now() };
+  S.sections.push(s); return s;
+}
+function defaultSection() {
+  let sec = secOf(curSection) || S.sections[0];
+  if (!sec) { let nb = S.notebooks[0]; if (!nb) S.notebooks.push(nb = { id: uid(), name: 'My Notebook', parentId: null }); sec = addSection(nb, 'Quick Notes'); }
+  return sec;
+}
+async function newNotebook() {
+  const name = await ask('Notebook name'); if (!name?.trim()) return;
+  const nb = { id: uid(), name: name.trim(), parentId: null }; S.notebooks.push(nb);
+  const s = addSection(nb, 'New Section'); save(); location.hash = `#/nb/${nb.id}/${s.id}`;
+}
+async function newSection(nb) {
+  const name = await ask('Section name', 'New Section'); if (!name?.trim()) return;
+  const s = addSection(nb, name.trim()); save(); location.hash = `#/nb/${nb.id}/${s.id}`;
+}
+function newNote(secId, o = {}) { // o.after: insert right below that page; o.level: subpage depth
+  const sec = secOf(secId) || defaultSection(), list = pagesOf(sec.id), prev = o.after || list.at(-1);
+  if (isSealed(sec)) return toast('Unlock this section first');
+  const n = { id: uid(), title: '', html: '', sectionId: sec.id, notebookId: sec.notebookId, level: o.level || 0, order: Date.now(), paper: prev?.paper || 'blank', pcolor: prev?.pcolor || 'dark', created: Date.now(), updated: Date.now() };
+  if (o.after && o.after.sectionId === sec.id) { list.splice(list.indexOf(o.after) + 1, 0, n); list.forEach((p, i) => p.order = i); }
+  S.notes.push(n); save(); location.hash = pageHref(n);
+}
+function setLevel(p, d) {
+  const list = pagesOf(p.sectionId), i = list.indexOf(p);
+  p.level = i === 0 ? 0 : Math.max(0, Math.min(2, (p.level || 0) + d, (list[i - 1].level || 0) + 1)); save();
+}
+
+// narrow windows (iPad portrait, small laptops) start with the icon-only sidebar; wide and narrow remember their own choice
+const NARROW = matchMedia('(max-width: 1099px)');
+const PHONE = matchMedia('(max-width: 700px)');
+PHONE.addEventListener('change', () => S && route());
+const sideCollapsed = () => PHONE.matches || NARROW.matches ? S.settings.collapsedNarrow ?? true : !!S.settings.collapsed;
+const toggleSide = () => { S.settings[NARROW.matches ? 'collapsedNarrow' : 'collapsed'] = !sideCollapsed(); save(); renderSide(...sideArgs); };
+NARROW.addEventListener('change', () => S && renderSide(...sideArgs));
+function renderPhoneNav(v) { // bottom tabs; the rest is under More
+  document.body.classList.remove('collapsed');
+  const tab = (id, ic, label, on, href) => `<${href ? `a href="${href}"` : 'button'} class="ptab${on ? ' on' : ''}" id="${id}">${icon(ic, 22)}<span>${label}</span></${href ? 'a' : 'button'}>`;
+  $('#side').innerHTML = `${tab('tHome', 'home', 'Home', v === 'home' || v === '', '#/home')}${tab('tNb', 'book', 'Notebooks', v === 'nb')}${tab('tTasks', 'tasks', 'Tasks', v === 'tasks', '#/tasks')}${tab('tFiles', 'files', 'Files', v === 'files', '#/files')}${tab('tMore', 'list', 'More', ['notes', 'calendar', 'boards', 'board', 'trash', 'settings'].includes(v))}
+    <button class="newbtn" id="sNew" title="New note">${icon('noteplus', 24)}</button>`;
+  $('#sNew').onclick = () => newNote(curSection);
+  const at = b => { const r = b.getBoundingClientRect(); return { preventDefault() { }, clientX: r.left, clientY: r.top - 8 - 330 }; }, go = h => () => location.hash = h;
+  $('#tNb').onclick = e => S.notebooks.length === 1 ? location.hash = `#/nb/${S.notebooks[0].id}` : ctxMenu(at(e.currentTarget), [...S.notebooks.map(n => [esc(n.name), go(`#/nb/${n.id}`)]), '-', ['＋ New notebook', () => newNotebook()]]);
+  $('#tMore').onclick = e => ctxMenu(at(e.currentTarget), [[`${icon('search', 16)} Search`, focusSearch], [`${icon('notes', 16)} All notes`, go('#/notes')], [`${icon('calendar', 16)} Calendar`, go('#/calendar')], [`${icon('pen', 16)} Whiteboards`, go('#/boards')], [`${icon('calc', 16)} Calculator`, () => toggleCalc(true)], ...(NATIVE ? [[`${icon('bulb', 16)} AI assistant`, () => $('#aiBtn').click()]] : []), '-', [`${icon('trash', 16)} Trash${S.trash.length ? ` (${S.trash.length})` : ''}`, go('#/trash')], [`${icon('settings', 16)} Settings`, go('#/settings')]]);
+}
+const backLink = (href, label) => `<a class="pback" href="${href}">${icon('left', 18)}${esc(label)}</a>`;
+const deckWidth = el => Math.min(1100, el.clientWidth - (PHONE.matches ? 20 : 90));
+function renderSide(v, a, b) {
+  sideArgs = [v, a, b];
+  if (PHONE.matches) return renderPhoneNav(v);
+  const col = sideCollapsed();
+  document.body.classList.toggle('collapsed', col);
+  const open = S.tasks.filter(t => !t.done).length;
+  const nav = (href, ic, label, on, badge = '') => `<a href="${href}" class="nav${on ? ' on' : ''}" title="${label}">${icon(ic)}<span class="lbl">${label}</span>${badge ? `<small class="lbl">${badge}</small>` : ''}</a>`;
+  $('#side').innerHTML = `<div class="top"><button class="ib" id="sSearch" title="Search everything (Ctrl+F)">${icon('search')}</button><button class="ib" id="sToggle" title="${col ? 'Expand' : 'Collapse'} sidebar">${icon(col ? 'right' : 'left')}</button></div>
+    <button class="newbtn" id="sNew" title="New note">${icon('noteplus', 22)}<span class="lbl">New note</span></button>
+    ${nav('#/home', 'home', 'Home', v === 'home')}
+    ${nav('#/notes', 'notes', 'Notes', v === 'notes', S.notes.length)}
+    ${nav('#/tasks', 'tasks', 'Tasks', v === 'tasks', open)}
+    ${nav('#/files', 'files', 'Files', v === 'files', S.files.length)}
+    ${nav('#/calendar', 'calendar', 'Calendar', v === 'calendar')}
+    ${nav('#/boards', 'pen', 'Whiteboards', v === 'boards' || v === 'board')}
+    <a class="nav${$('#calc').hidden ? '' : ' on'}" id="sCalc" title="Calculator (Ctrl+Shift+C)">${icon('calc')}<span class="lbl">Calculator</span></a>
+    <div class="sep2"></div>
+    <div class="sh">Notebooks <button id="sNb" title="New notebook">${icon('plus', 16)}</button></div>
+    ${col ? `<a class="nav" id="sNbs" title="Notebooks">${icon('book')}</a>` : S.notebooks.map(n => `<a href="#/nb/${n.id}" class="nav nbitem${v === 'nb' && a === n.id ? ' on' : ''}" title="${esc(n.name)}">${icon('book', 18)}<span class="lbl">${esc(n.name)}</span><small>${S.notes.filter(x => x.notebookId === n.id).length || ''}</small></a>${v === 'nb' && a === n.id ? sectionsOf(n.id).map(s => `<a href="#/nb/${n.id}/${s.id}" class="nav nbitem secitem${(b || curSection) === s.id ? ' on' : ''}" title="${esc(s.name)}"><span class="cdot" style="background:${s.color}"></span><span class="lbl">${esc(s.name)}</span>${s.lock ? `<small class="lbl">${icon(isSealed(s) ? 'lock' : 'unlock', 12)}</small>` : ''}</a>`).join('') : ''}`).join('')}
+    <span style="flex:1"></span>${nav('#/trash', 'trash', 'Trash', v === 'trash', S.trash.length)}${nav('#/settings', 'settings', 'Settings', v === 'settings')}`;
+  const toggle = toggleSide;
+  $('#sToggle').onclick = toggle;
+  if (col) $('#sNbs').onclick = toggle;
+  $('#sSearch').onclick = focusSearch;
+  $('#sCalc').onclick = () => toggleCalc();
+  $('#sNew').onclick = () => newNote(curSection);
+  $('#sNb').onclick = () => newNotebook();
+}
+
+/* ---------- notes ---------- */
+function viewNotes(nbId, noteId) {
+  const nb = nbId && S.notebooks.find(n => n.id === nbId);
+  if (nbId && !nb) return location.hash = '#/notes';
+  const base = nb ? `#/nb/${nb.id}` : '#/notes';
+  const ids = nb && new Set(nbDesc(nb.id));
+  const notes = () => openNotes().filter(n => !ids || ids.has(n.notebookId)).sort((x, y) => y.updated - x.updated);
+  const sel = S.notes.find(n => n.id === noteId) || notes()[0];
+  main.innerHTML = `<div class="split" data-pane="${noteId ? 'view' : 'list'}"><div class="list" data-rz="list:220:600"><header>
+      <div class="row"><h2>${icon(nb ? 'book' : 'notes')}${nb ? esc(nb.name) : 'Notes'}</h2><button class="pri" id="nn">${icon('plus', 16)} Note</button></div>
+      ${nb ? '<div class="row"><button id="nbSub">＋ Folder</button><button id="nbRen">Rename</button><button id="nbDel">Delete</button></div>' : ''}
+      <input id="q" placeholder="Search notes…"></header><div class="items" id="items"></div></div><div class="editor" id="ed"></div></div>`;
+  addResizers(main);
+  const items = () => {
+    const q = $('#q').value.toLowerCase();
+    $('#items').innerHTML = notes().filter(n => !q || (n.title + ' ' + plain(n.html)).toLowerCase().includes(q))
+      .map(n => `<div class="item${n === sel ? ' on' : ''}" data-id="${n.id}"><b>${esc(n.title || 'Untitled')}</b><p>${esc(plain(n.html).slice(0, 160))}</p><small>${nb ? '' : esc(nbName(n.notebookId)) + ' · '}${ago(n.updated)}</small></div>`).join('')
+      || '<p class="mut" style="padding:14px">No notes here yet.</p>';
+  };
+  $('#q').oninput = items;
+  $('#items').onclick = e => { const it = e.target.closest('.item'); if (it) location.hash = `${base}/${it.dataset.id}`; };
+  $('#nn').onclick = () => newNote(curSection);
+  if (nb) {
+    $('#nbSub').onclick = () => newNotebook(nb.id);
+    $('#nbRen').onclick = async () => { const n = await ask('Rename', nb.name); if (n?.trim()) { nb.name = n.trim(); save(); route(); } };
+    $('#nbDel').onclick = () => {
+      if (!confirm(`Delete "${nb.name}"?\nNotes inside move to "No notebook" and sub-folders move up one level.`)) return;
+      S.notes.forEach(n => n.notebookId === nb.id && (n.notebookId = null));
+      S.notebooks.forEach(n => n.parentId === nb.id && (n.parentId = nb.parentId));
+      S.notebooks = S.notebooks.filter(n => n !== nb); save(); location.hash = '#/notes';
+    };
+  }
+  items();
+  if (sel) { openEditor($('#ed'), sel, items, base); $('#ed').insertAdjacentHTML('afterbegin', backLink(base, nb ? nb.name : 'All notes')); }
+  else $('#ed').innerHTML = '<div class="empty">No notes yet — click ＋ Note.</div>';
+}
+
+/* ---------- resizable / foldable columns: <div data-rz="key:min:max"> gets a drag divider after it ---------- */
+function addResizers(root) {
+  root.querySelectorAll('[data-rz]').forEach(pane => {
+    const [key, min, max] = pane.dataset.rz.split(':'), W = S.settings.widths ||= {}, st = W[key] ||= {};
+    if (st.w) pane.style.width = st.w + 'px';
+    pane.classList.toggle('folded', !!st.folded);
+    const h = Object.assign(document.createElement('div'), { className: 'rz', title: 'Drag to resize · double-click to fold' }); pane.after(h);
+    const fold = f => { st.folded = f; pane.classList.toggle('folded', f); save(); };
+    h.ondblclick = () => fold(!st.folded);
+    pane.addEventListener('click', e => { if (st.folded) { e.stopPropagation(); fold(false); } }, true);
+    h.onpointerdown = e => {
+      e.preventDefault(); try { h.setPointerCapture(e.pointerId); } catch { } h.classList.add('drag'); document.body.style.userSelect = 'none';
+      const x0 = e.clientX, w0 = st.folded ? 0 : pane.offsetWidth;
+      h.onpointermove = m => {
+        const w = w0 + m.clientX - x0;
+        if (w < 70) { pane.classList.add('folded'); st.folded = true; }
+        else { pane.classList.remove('folded'); st.folded = false; st.w = Math.max(+min, Math.min(+max, w)); pane.style.width = st.w + 'px'; }
+      };
+      h.onpointerup = () => { h.onpointermove = h.onpointerup = null; h.classList.remove('drag'); document.body.style.userSelect = ''; save(); };
+    };
+  });
+}
+
+/* ---------- notebook view: sections | pages (+ chapter points) | page ---------- */
+function ctxMenu(e, items) { // items: [label, fn] | '-' | ['palette', fn(color), current] | ['row', [[html, fn, title], …]] (a bar of small buttons)
+  e.preventDefault(); document.querySelector('.ctx')?.remove();
+  const m = document.createElement('div'); m.className = 'ctx';
+  m.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : it[0] === 'palette' ? `<div class="pal">${SECTION_COLORS.map(c => `<button data-i="${i}" data-c="${c}" style="background:${c}${c === it[2] ? ';outline:2px solid #fff' : ''}"></button>`).join('')}</div>`
+    : it[0] === 'row' ? `<div class="ctxbar">${it[1].map(([h, , t], j) => h === '|' ? '<span class="vs"></span>' : `<button data-i="${i}" data-j="${j}" title="${t || ''}">${h}</button>`).join('')}</div>` : `<button data-i="${i}">${it[0]}</button>`).join('');
+  document.body.append(m);
+  m.style.left = Math.max(8, Math.min(e.clientX, innerWidth - m.offsetWidth - 8)) + 'px'; m.style.top = Math.max(8, Math.min(e.clientY, innerHeight - m.offsetHeight - 8)) + 'px';
+  m.onmousedown = ev => ev.preventDefault(); // keep the text selection for format commands
+  m.onclick = ev => { const b = ev.target.closest('button'); if (!b) return; m.remove(); const it = items[b.dataset.i]; it[0] === 'palette' ? it[1](b.dataset.c) : it[0] === 'row' ? it[1][b.dataset.j][1]() : it[1](); };
+  setTimeout(() => addEventListener('pointerdown', function off(ev) { if (!m.contains(ev.target)) { m.remove(); removeEventListener('pointerdown', off); } }));
+}
+// touch: press and hold ~0.5 s = right-click (iPad Safari never fires contextmenu). Pages/sections aren't touch-draggable
+// (iPad would turn the hold into a drag) — their menu has Move up / down instead.
+let lp = null;
+addEventListener('pointerdown', e => {
+  clearTimeout(lp?.t); if (e.pointerType !== 'touch') return void (lp = null);
+  const drag = e.target.closest?.('.on-pg[draggable=true],.on-sec[draggable=true]'); if (drag) drag.draggable = false;
+  lp = { x: e.clientX, y: e.clientY, drag, t: setTimeout(() => { lp.fired = true; e.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: lp.x, clientY: lp.y })); }, 500) };
+}, true);
+addEventListener('pointermove', e => { if (lp && !lp.fired && e.pointerType === 'touch' && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) clearTimeout(lp.t); }, true);
+for (const t of ['pointerup', 'pointercancel']) addEventListener(t, e => { if (!lp || e.pointerType !== 'touch') return; clearTimeout(lp.t); if (lp.drag) lp.drag.draggable = true; if (lp.fired) lp.eat = Date.now(); }, true);
+addEventListener('contextmenu', e => { if (!e.isTrusted || !lp) return; if (lp.fired) { e.preventDefault(); e.stopImmediatePropagation(); } else { clearTimeout(lp.t); lp.fired = true; } }, true); // the browser's own long-press menu (Chromium) — only one menu
+addEventListener('click', e => { if (lp?.eat && Date.now() - lp.eat < 600) { e.preventDefault(); e.stopImmediatePropagation(); lp = null; } }, true); // the finger lifting after a long-press isn't a tap
+const moveIn = (list, it, d, set) => { const i = list.indexOf(it), j = i + d; if (j < 0 || j >= list.length) return; [list[i], list[j]] = [list[j], list[i]]; list.forEach((x, k) => x.order = k); set?.(list); save(); };
+function viewNotebook(nbId, secId, pageId) {
+  const nb = S.notebooks.find(n => n.id === nbId); if (!nb) return location.hash = '#/notes';
+  if (secId === 'index') return viewIndex(nb);
+  if (secId === 'tags') return viewTagSummary(nb);
+  const secs = sectionsOf(nb.id);
+  const sec = secOf(secId) || secOf(nb.lastSection) || secs[0] || addSection(nb, 'New Section');
+  nb.lastSection = curSection = sec.id;
+  const pages = pagesOf(sec.id), page = pages.find(p => p.id === pageId) || pages.find(p => p.id === sec.lastPage) || pages[0];
+  if (page) sec.lastPage = page.id;
+  main.innerHTML = `<div class="on-wrap" style="--secc:${sec.color}">
+    <div class="on-top"><h2>${icon('book')}<span>${esc(nb.name)}</span></h2><a class="btn" href="#/nb/${nb.id}/index" title="Contents and A–Z index of this notebook">${icon('list', 16)} Index</a><a class="btn" href="#/nb/${nb.id}/tags" title="Every tagged line in this notebook">${icon('tag', 16)} Tags summary</a>${sec.lock && !isSealed(sec) ? `<button id="lockNow" title="Lock this section now">${icon('lock', 16)} Lock</button>` : ''}<button id="nbMenu" title="Notebook options">⋯</button></div>
+    <div class="on-cols" data-pane="${isSealed(sec) && secId || pageId ? 'page' : secId ? 'pages' : 'secs'}">
+      <div class="on-secs" data-rz="secs:120:420"><div class="on-h">Sections <button id="addSec" title="New section (Ctrl+T)">＋</button></div><div id="secList">${secs.map(s => `<div class="on-sec${s === sec ? ' on' : ''}" draggable="true" data-id="${s.id}" style="--c:${s.color}" title="Double-click to rename, right-click for options"><span class="tabc"></span><span class="nm">${esc(s.name)}</span>${s.lock ? `<span class="mut" title="${isSealed(s) ? 'Locked' : 'Unlocked'}">${icon(isSealed(s) ? 'lock' : 'unlock', 13)}</span>` : `<small>${pagesOf(s.id).length || ''}</small>`}</div>`).join('')}</div></div>
+      <div class="on-pages" data-rz="pages:170:560">${backLink(`#/nb/${nb.id}`, 'Sections')}<div class="on-h">Pages <button id="addPg" title="New page (Ctrl+N)">＋ Page</button></div><input id="pq" placeholder="Search notebook…"><div id="pgList"></div></div>
+      <div class="editor" id="ed"></div>
+    </div></div>`;
+  const pgList = $('#pgList'), secList = $('#secList');
+  addResizers(main);
+  const drawPages = () => {
+    const q = $('#pq').value.toLowerCase();
+    const list = q ? openNotes().filter(n => n.notebookId === nb.id && (n.title + ' ' + plain(n.html)).toLowerCase().includes(q)) : pagesOf(sec.id);
+    pgList.innerHTML = list.map(p => `<div class="on-pg lv${q ? 0 : p.level || 0}${p === page ? ' on' : ''}" draggable="${!q}" data-id="${p.id}"><b>${esc(p.title || 'Untitled page')}</b>${q ? `<small>${esc(secOf(p.sectionId)?.name || '')}</small>` : ''}</div>${p === page && !q ? headingsOf(p).map(h => `<div class="on-hd h${h.lv}" data-h="${h.i}" title="Jump to this heading">${esc(h.text)}</div>`).join('') : ''}`).join('')
+      || `<p class="mut" style="padding:12px">${q ? 'No matches.' : 'No pages yet — press Ctrl+N.'}</p>`;
+  };
+  $('#pq').oninput = drawPages;
+  pgList.onclick = e => {
+    const h = e.target.closest('.on-hd'); if (h) return $('#body')?.querySelectorAll('h1,h2,h3')[+h.dataset.h]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const it = e.target.closest('.on-pg'); if (it) location.hash = pageHref(S.notes.find(n => n.id === it.dataset.id));
+  };
+  pgList.oncontextmenu = e => {
+    const it = e.target.closest('.on-pg'); if (!it) return; const p = S.notes.find(n => n.id === it.dataset.id);
+    ctxMenu(e, [['＋ New page below', () => newNote(p.sectionId, { after: p })], ['↳ New subpage', () => newNote(p.sectionId, { after: p, level: Math.min((p.level || 0) + 1, 2) })], '-',
+      ['⇥ Make subpage  (Ctrl+Alt+])', () => { setLevel(p, 1); drawPages(); }], ['⇤ Promote  (Ctrl+Alt+[)', () => { setLevel(p, -1); drawPages(); }], '-',
+      ['↑ Move up', () => { moveIn(pagesOf(p.sectionId), p, -1, l => l[0].level = 0); drawPages(); }], ['↓ Move down', () => { moveIn(pagesOf(p.sectionId), p, 1, l => l[0].level = 0); drawPages(); }], '-',
+      ['Delete page', async () => { if (confirm(`Move "${p.title || 'Untitled page'}" to the trash?`)) { await trashNote(p); location.hash = `#/nb/${nb.id}/${sec.id}`; route(); } }]]);
+  };
+  secList.onclick = e => { const it = e.target.closest('.on-sec'); if (it) location.hash = `#/nb/${nb.id}/${it.dataset.id}`; };
+  const renameSec = async s => { const n = await ask('Section name', s.name); if (n?.trim()) { s.name = n.trim(); save(); route(); } };
+  secList.ondblclick = e => { const it = e.target.closest('.on-sec'); if (it) renameSec(secOf(it.dataset.id)); };
+  secList.oncontextmenu = e => {
+    const it = e.target.closest('.on-sec'); if (!it) return; const s = secOf(it.dataset.id);
+    ctxMenu(e, [['✏ Rename', () => renameSec(s)], ['palette', c => { s.color = c; save(); route(); }, s.color], ['＋ New page here', () => newNote(s.id)], '-',
+      ['↑ Move up', () => { moveIn(sectionsOf(nb.id), s, -1); route(); }], ['↓ Move down', () => { moveIn(sectionsOf(nb.id), s, 1); route(); }], '-',
+      ...(!s.lock ? [[`${icon('lock', 15)} Password protect…`, () => protectSection(s)]] : isSealed(s) ? [] : [[`${icon('lock', 15)} Lock now`, () => lockSection(s)], [`${icon('unlock', 15)} Remove password`, () => removeProtection(s)]]), '-',
+      ['Delete section', async () => {
+        const n = pagesOf(s.id).length;
+        if (!confirm(`Move section "${s.name}"${n ? ` and its ${n} page${n > 1 ? 's' : ''}` : ''} to the trash?`)) return;
+        await trashSection(s); location.hash = `#/nb/${nb.id}`; route();
+      }]]);
+  };
+  // drag pages to reorder (or onto a section to move them); drag sections to reorder
+  let drag = null;
+  const clear = () => main.querySelectorAll('.dragging,.drop-before,.drop-into').forEach(x => x.classList.remove('dragging', 'drop-before', 'drop-into'));
+  pgList.ondragstart = e => { const it = e.target.closest('.on-pg'); if (!it) return; drag = { kind: 'page', id: it.dataset.id }; e.dataTransfer.setData('text/plain', it.dataset.id); it.classList.add('dragging'); };
+  secList.ondragstart = e => { const it = e.target.closest('.on-sec'); if (!it) return; drag = { kind: 'sec', id: it.dataset.id }; e.dataTransfer.setData('text/plain', it.dataset.id); it.classList.add('dragging'); };
+  main.querySelector('.on-cols').ondragend = () => { drag = null; clear(); };
+  pgList.ondragover = e => { if (drag?.kind !== 'page') return; e.preventDefault(); main.querySelectorAll('.drop-before').forEach(x => x.classList.remove('drop-before')); e.target.closest('.on-pg')?.classList.add('drop-before'); };
+  pgList.ondrop = e => {
+    if (drag?.kind !== 'page') return; e.preventDefault();
+    const t = e.target.closest('.on-pg'), moving = S.notes.find(n => n.id === drag.id), list = pagesOf(sec.id).filter(p => p !== moving);
+    const i = t ? list.findIndex(p => p.id === t.dataset.id) : -1; list.splice(i < 0 ? list.length : i, 0, moving);
+    list.forEach((p, j) => p.order = j); if (list[0]) list[0].level = 0; drag = null; clear(); save(); drawPages();
+  };
+  secList.ondragover = e => { if (!drag) return; e.preventDefault(); main.querySelectorAll('.drop-before,.drop-into').forEach(x => x.classList.remove('drop-before', 'drop-into')); e.target.closest('.on-sec')?.classList.add(drag.kind === 'page' ? 'drop-into' : 'drop-before'); };
+  secList.ondrop = e => {
+    e.preventDefault(); if (!drag) return; const t = e.target.closest('.on-sec');
+    if (drag.kind === 'page') { if (!t) return; const p = S.notes.find(n => n.id === drag.id), s = secOf(t.dataset.id); if (isSealed(s)) { drag = null; return toast('Unlock that section first'); } Object.assign(p, { sectionId: s.id, notebookId: s.notebookId, level: 0, order: Date.now() }); }
+    else { const moving = secOf(drag.id), list = sectionsOf(nb.id).filter(s => s !== moving), i = t ? list.findIndex(s => s.id === t.dataset.id) : -1; list.splice(i < 0 ? list.length : i, 0, moving); list.forEach((s, j) => s.order = j); }
+    drag = null; save(); route();
+  };
+  $('#addSec').onclick = () => newSection(nb);
+  $('#addPg').onclick = () => newNote(sec.id);
+  $('#nbMenu').onclick = e => ctxMenu(e, [['✏ Rename notebook', async () => { const n = await ask('Notebook name', nb.name); if (n?.trim()) { nb.name = n.trim(); save(); route(); } }], ['＋ New section  (Ctrl+T)', () => newSection(nb)], [`${icon('download', 15)} Export notebook as PDF`, () => exportNotebook(nb)], '-',
+    ['Delete notebook', async () => {
+      const n = S.notes.filter(p => p.notebookId === nb.id).length;
+      if (!confirm(`Move notebook "${nb.name}" with all its sections and ${n} page${n === 1 ? '' : 's'} to the trash?`)) return;
+      await trashNotebook(nb); location.hash = '#/home';
+    }]]);
+  if ($('#lockNow')) $('#lockNow').onclick = () => lockSection(sec);
+  if (isSealed(sec)) { // locked: no page list, just the unlock form
+    $('#pgList').innerHTML = `<div class="lockmsg">${icon('lock', 26)}<p>This section is password protected.</p></div>`;
+    $('#ed').innerHTML = `<div class="empty"><form class="lockform" id="unl">${icon('lock', 34)}<h3>${esc(sec.name)} is locked</h3><input type="password" name="pw" placeholder="Password"><button class="pri">Unlock</button><small class="mut" id="unlErr">&nbsp;</small></form></div>`;
+    $('#unl').onsubmit = async e => {
+      e.preventDefault(); $('#unlErr').textContent = 'Unlocking…';
+      if (await unlockSection(sec, e.target.pw.value)) route(); else { $('#unlErr').textContent = 'Wrong password'; e.target.pw.select(); }
+    };
+    return setTimeout(() => $('#unl input')?.focus());
+  }
+  drawPages();
+  if (page) { openEditor($('#ed'), page, drawPages, `#/nb/${nb.id}/${sec.id}`); $('#ed').insertAdjacentHTML('afterbegin', backLink(`#/nb/${nb.id}/${sec.id}`, sec.name)); }
+  else { $('#ed').innerHTML = `<div class="empty"><div>${icon('notes', 40)}<p>This section is empty.</p><button class="pri">＋ New page</button></div></div>`; $('#ed button').onclick = () => newNote(sec.id); }
+}
+function viewIndex(nb) {
+  main.innerHTML = `<div class="page"><div class="row"><h1 style="flex:1">${esc(nb.name)} — Index</h1><a class="btn" href="#/nb/${nb.id}">Back to notebook</a></div>
+    <div class="row" style="margin:14px 0"><button class="pri" data-m="toc">Contents</button><button data-m="az">A–Z index</button><input id="iq" placeholder="Filter…" style="flex:1"></div><div id="idx"></div></div>`;
+  let mode = 'toc';
+  const entries = () => sectionsOf(nb.id).filter(s => !isSealed(s)).flatMap(s => pagesOf(s.id).flatMap(p => [{ text: p.title || 'Untitled page', href: pageHref(p), sec: s, page: true },
+    ...headingsOf(p).map(h => ({ text: h.text, href: pageHref(p), h: h.i, sec: s, of: p.title || 'Untitled page' }))]));
+  const draw = () => {
+    const q = $('#iq').value.toLowerCase(), hit = t => !q || t.toLowerCase().includes(q);
+    if (mode === 'toc') $('#idx').innerHTML = sectionsOf(nb.id).map(s => `<div class="ix-sec" style="--c:${s.color}"><h3><a href="#/nb/${nb.id}/${s.id}">${esc(s.name)}</a></h3>${isSealed(s) ? `<p class="mut">${icon('lock', 14)} Locked — open the section to unlock</p>` : pagesOf(s.id).map(p => {
+      const hs = headingsOf(p).filter(h => hit(h.text)); if (!hit(p.title || '') && !hs.length) return '';
+      return `<a class="ix-pg lv${p.level || 0}" href="${pageHref(p)}">${esc(p.title || 'Untitled page')} <small>${new Date(p.created).toLocaleDateString(LOC)}</small></a>${hs.map(h => `<a class="ix-hd h${h.lv}" href="${pageHref(p)}" data-h="${h.i}">${esc(h.text)}</a>`).join('')}`;
+    }).join('') || '<p class="mut">No pages.</p>'}</div>`).join('');
+    else {
+      const list = entries().filter(x => hit(x.text)).sort((a, b) => a.text.localeCompare(b.text, undefined, { sensitivity: 'base' }));
+      const groups = {}; list.forEach(x => (groups[(x.text[0] || '#').toUpperCase().replace(/[^A-Z]/, '#')] ||= []).push(x));
+      $('#idx').innerHTML = `<div class="az">${Object.entries(groups).map(([L, xs]) => `<h4>${L}</h4>${xs.map(x => `<a class="ix-pg" href="${x.href}"${x.h != null ? ` data-h="${x.h}"` : ''}>${esc(x.text)} <small>${x.page ? esc(x.sec.name) : `in ${esc(x.of)} · ${esc(x.sec.name)}`}</small></a>`).join('')}`).join('') || '<p class="mut">Nothing yet.</p>'}</div>`;
+    }
+  };
+  main.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { mode = b.dataset.m; main.querySelectorAll('[data-m]').forEach(x => x.classList.toggle('pri', x === b)); draw(); });
+  $('#iq').oninput = draw;
+  $('#idx').onclick = e => { const a = e.target.closest('[data-h]'); if (a) pendingHeading = +a.dataset.h; };
+  draw();
+}
+function viewTagSummary(nb) {
+  const groups = { todo: [], done: [], important: [], question: [], remember: [], definition: [], critical: [] };
+  for (const p of openNotes().filter(n => n.notebookId === nb.id)) {
+    const d = new DOMParser().parseFromString(p.html || '', 'text/html');
+    d.querySelectorAll('.ntag, input[type=checkbox]').forEach(t => {
+      const key = t.matches('input') ? (t.hasAttribute('checked') ? 'done' : 'todo') : t.dataset.tag, blk = t.closest('p,li,h1,h2,h3,div,blockquote') || t.parentElement;
+      groups[key]?.push({ text: blk.textContent.replace(/[⭐❓💡📘❗]/gu, '').trim() || '(empty)', p });
+    });
+  }
+  const label = { ...Object.fromEntries(Object.entries(NTAGS).map(([k, t]) => [k, `${icon(t.ic, 15)} ${t.name}`])), done: `${icon('check', 15)} Done` };
+  main.innerHTML = `<div class="page"><div class="row"><h1 style="flex:1">Tags summary — ${esc(nb.name)}</h1><a class="btn" href="#/nb/${nb.id}">Back to notebook</a></div>
+    ${Object.entries(groups).filter(([, v]) => v.length).map(([k, v]) => `<div class="tgroup">${label[k]} · ${v.length}</div>${v.map(x => `<a class="ix-pg" href="${pageHref(x.p)}">${esc(x.text)} <small>${esc(x.p.title || 'Untitled page')} · ${esc(secOf(x.p.sectionId)?.name || '')}</small></a>`).join('')}`).join('')
+    || '<p class="mut">No tagged lines yet. In a page, press Ctrl+1 for a to-do, Ctrl+2 Important, Ctrl+3 Question, Ctrl+4 Remember, Ctrl+5 Definition, Ctrl+6 Critical.</p>'}</div>`;
+}
+
+const NTAGS = { todo: { ic: 'check', name: 'To Do' }, important: { ic: 'star', name: 'Important' }, question: { ic: 'question', name: 'Question' }, remember: { ic: 'bulb', name: 'Remember for later' }, definition: { ic: 'bookopen', name: 'Definition' }, critical: { ic: 'alert', name: 'Critical' } };
+const tagEl = key => { const t = Object.assign(document.createElement('span'), { className: 'ntag', contentEditable: 'false', title: NTAGS[key].name, innerHTML: icon(NTAGS[key].ic, 16) }); t.dataset.tag = key; return t; };
+const PAPERS = [['blank', 'Blank'], ['college', 'College ruled'], ['wide', 'Wide ruled'], ['narrow', 'Narrow ruled'], ['grid-s', 'Small grid'], ['grid-l', 'Large grid'], ['dots', 'Dot grid']];
+const PCOLORS = [['dark', 'Dark'], ['white', 'White'], ['cream', 'Cream'], ['blue', 'Blue'], ['green', 'Green'], ['pink', 'Pink'], ['yellow', 'Yellow']];
+let pendingHeading = null; // index of a heading to scroll to once the page opens
+const TBI = (c, title, inner) => `<button class="ti" data-c="${c}" title="${title}">${inner}</button>`;
+const STYLES = [['p', 'Normal text', 'font-size:14px', 'Ctrl+Alt+0'], ['h1', 'Heading 1', 'font-size:20px;font-weight:700', 'Ctrl+Alt+1'], ['h2', 'Heading 2', 'font-size:17px;font-weight:700', 'Ctrl+Alt+2'], ['h3', 'Heading 3', 'font-size:15px;font-weight:700', 'Ctrl+Alt+3'], ['blockquote', 'Quote', 'font-style:italic;border-left:2px solid #777;padding-left:8px', ''], ['pre', 'Code block', 'font-family:Consolas,monospace', '']];
+const TB = `<button class="tstyle" data-c="style" title="Text style"><span class="tsl">Normal text</span>${icon('down', 14)}</button><span class="vs"></span>
+  ${TBI('bold', 'Bold (Ctrl+B)', '<b>B</b>')}${TBI('italic', 'Italic (Ctrl+I)', '<i style="font-family:Georgia,serif">I</i>')}${TBI('underline', 'Underline (Ctrl+U)', '<u>U</u>')}${TBI('strikeThrough', 'Strikethrough', '<s>S</s>')}<button class="ti tmenu" data-c="hl" title="Highlight (Ctrl+Alt+H)">${icon('marker', 17)}${icon('down', 12)}</button><span class="vs"></span>
+  ${TBI('insertUnorderedList', 'Bulleted list (Ctrl+.)', icon('ul', 18))}${TBI('insertOrderedList', 'Numbered list (Ctrl+/)', icon('ol', 18))}${TBI('check', 'To-do (Ctrl+1)', icon('check', 18))}<button class="ti tmenu" data-c="tags" title="Tags (Ctrl+1–6)">${icon('tag', 17)}${icon('down', 12)}</button><span class="vs"></span>
+  ${TBI('link', 'Link (Ctrl+K)', icon('link', 17))}${TBI('image', 'Insert picture (on iPad: take a photo)', icon('image', 17))}${TBI('table', 'Table', icon('table', 17))}${TBI('insertHorizontalRule', 'Divider', icon('hr', 18))}<span class="vs"></span>
+  ${TBI('math', 'Equation (Alt+=)', '<span class="tx">x²</span>')}${TBI('mathd', 'Block equation', '<span class="tx" style="font-style:normal">∑</span>')}<span class="vs"></span>
+  ${TBI('template', 'Page templates', icon('layout', 17))}${TBI('cite', 'Citations', icon('quote', 17))}<span class="vs"></span>${TBI('removeFormat', 'Clear formatting', icon('clear', 17))}`;
+
+function openEditor(el, note, refresh, base) {
+  currentNote = note;
+  const created = new Date(note.created);
+  el.innerHTML = `<div class="etop"><select id="nbSel" title="Move to section">${S.notebooks.map(nb => `<optgroup label="${esc(nb.name)}">${sectionsOf(nb.id).map(s => `<option value="${s.id}"${s.id === note.sectionId ? ' selected' : ''}${isSealed(s) ? ' disabled' : ''}>${esc(s.name)}${s.lock ? ' 🔒' : ''}</option>`).join('')}</optgroup>`).join('')}</select>
+    <select id="paperSel" title="Paper style">${PAPERS.map(([v, t]) => `<option value="${v}"${(note.paper || 'blank') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+    <select id="pcSel" title="Page colour">${PCOLORS.map(([v, t]) => `<option value="${v}"${(note.pcolor || 'dark') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+    <span style="flex:1">Edited ${ago(note.updated)}</span><button id="ttsBtn" title="Read aloud: the selected text, or the whole page">${icon('speaker', 15)}</button><button id="drawBtn" class="tdraw${S.settings.inkRow ? ' on' : ''}" title="Show pen & ink tools (your stylus draws either way in “Stylus draws” mode)">${icon('pen', 15)} Draw</button><button id="expBtn" title="Export as PDF">${icon('download', 15)} Export</button><button id="delNote">${icon('trash', 16)} Delete</button></div>
+    <input class="title" id="title" placeholder="Title" value="${esc(note.title)}"><div class="pdate">${created.toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} &nbsp; ${hm(created)}</div><div class="tb etb">${TB}</div><div class="inkrow"${S.settings.inkRow ? '' : ' hidden'}>${inkBar()}</div>
+    <div class="bodywrap" id="bw"><div class="body paper-${note.paper || 'blank'} pc-${note.pcolor || 'dark'}" id="body" contenteditable="true" spellcheck="true">${note.html}</div><canvas class="ink"></canvas><div class="imgbar" hidden></div></div><input type="file" id="picIn" accept="image/*" hidden>`;
+  const body = $('#body', el), title = $('#title', el);
+  body.querySelectorAll('.math').forEach(renderOne);
+  body.querySelectorAll('.ntag').forEach(t => { if (NTAGS[t.dataset.tag]) t.innerHTML = icon(NTAGS[t.dataset.tag].ic, 16); t.contentEditable = 'false'; }); // older pages stored emoji
+  const ig = inkGroup($('.inkbar', el)), ink = attachInk(ig, { host: $('#bw', el), canvas: $('canvas.ink', el), list: () => note.ink ||= [], save: () => { note.updated = Date.now(); save(); } });
+  ig.onText = async () => { // handwriting on the page -> typed paragraphs at the end of the page
+    const strokes = (note.ink || []).filter(s => s.t !== 'hl'), t = await recognizeInk(strokes); if (t == null) return;
+    inkTextDialog(t, 'insert', (v, keep) => {
+      const wrap = document.createElement('div'); wrap.innerHTML = v.split('\n').map(l => `<p>${esc(l) || '<br>'}</p>`).join(''); mathify(wrap);
+      body.append(...wrap.childNodes); if (!keep) ink.apply(strokes, []); touch(); toast('Handwriting converted');
+    });
+  };
+  let fitT; new ResizeObserver(() => { clearTimeout(fitT); fitT = setTimeout(ink.fit, 100); }).observe(body);
+  mathGhost(body, $('#bw', el));
+  const touch = () => {
+    const c = body.cloneNode(true); c.querySelectorAll('.math').forEach(m => { m.textContent = ''; m.removeAttribute('contenteditable'); }); c.querySelectorAll('img.sel').forEach(i => i.classList.remove('sel'));
+    note.html = c.innerHTML; note.updated = Date.now(); save(); refresh();
+  };
+  const insertMath = async (display, range) => {
+    const t = await ask(display ? 'Block equation (LaTeX)' : 'Equation (LaTeX)', range?.toString() || '', true);
+    body.focus(); if (!t?.trim()) return;
+    const chip = mathChip(t, display), sp = document.createTextNode('\u00a0');
+    if (range) { range.deleteContents(); range.insertNode(sp); range.insertNode(chip); } else body.append(chip, sp);
+    getSelection().collapse(sp, 1); touch();
+  };
+  const curRange = () => { const s = getSelection(); return s.rangeCount && body.contains(s.anchorNode) ? s.getRangeAt(0).cloneRange() : null; };
+  title.oninput = () => { note.title = title.value; note.updated = Date.now(); save(); refresh(); };
+  title.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); body.focus(); } };
+  body.oninput = e => { if (e.data === '$') autoMath(); touch(); };
+  const blockOf = () => { // the paragraph/heading/list item holding the caret
+    const n = getSelection().anchorNode; if (!n || !body.contains(n)) return null;
+    let b = (n.nodeType === 3 ? n.parentElement : n).closest('p,li,h1,h2,h3,div,blockquote,pre');
+    if (!b || b === body) { document.execCommand('formatBlock', false, 'p'); const a = getSelection().anchorNode; b = (a.nodeType === 3 ? a.parentElement : a).closest('p'); }
+    return b && body.contains(b) ? b : null;
+  };
+  const applyTag = key => { // OneNote-style tag at the start of the paragraph; same tag again removes it
+    const b = blockOf(); if (!b) return;
+    const first = b.firstChild?.nodeType === 1 && b.firstChild.matches('.ntag,input[type=checkbox]') ? b.firstChild : null;
+    const same = first && (key === 'todo' ? first.matches('input') : first.dataset.tag === key);
+    first?.remove();
+    if (key && key !== 'none' && !same) {
+      const t = key === 'todo' ? Object.assign(document.createElement('input'), { type: 'checkbox' }) : tagEl(key);
+      b.prepend(t);
+    }
+    touch();
+  };
+  const fmt = (cmd, v = null) => { document.execCommand(cmd, false, v); touch(); };
+  body.onkeydown = e => {
+    const mod = e.ctrlKey || e.metaKey, digit = /^Digit(\d)$/.exec(e.code)?.[1];
+    const hit = f => { e.preventDefault(); f(); };
+    if (e.altKey && !mod && (e.key === '=' || e.code === 'Equal')) return hit(() => { // Alt+= like Word: block equation when the line is empty
+      const n = getSelection().anchorNode, blk = (n?.nodeType === 3 ? n.parentElement : n)?.closest('p,div,li,h1,h2,h3,blockquote');
+      insertMath(!n || n === body || !((blk && blk !== body ? blk : n).textContent.trim()), curRange());
+    });
+    if (mod && !e.altKey && digit && +digit <= 6) return hit(() => applyTag(['none', 'todo', 'important', 'question', 'remember', 'definition', 'critical'][+digit]));
+    if (mod && e.altKey && digit && +digit <= 3) return hit(() => fmt('formatBlock', +digit ? 'h' + digit : 'p'));
+    if (mod && !e.shiftKey && e.key === '.') return hit(() => fmt('insertUnorderedList'));
+    if (mod && !e.shiftKey && e.key === '/') return hit(() => fmt('insertOrderedList'));
+    if (mod && e.key.toLowerCase() === 'k') return hit(() => tb.querySelector('[data-c=link]').click());
+    if (mod && e.altKey && e.code === 'KeyH') return hit(() => highlight(HL_COLORS[0][1]));
+    if (e.altKey && e.shiftKey && /^Key[DTF]$/.test(e.code)) return hit(() => {
+      const d = new Date(), date = d.toLocaleDateString(LOC), time = hm(d);
+      document.execCommand('insertText', false, { KeyD: date, KeyT: time, KeyF: `${date} ${time}` }[e.code]);
+    });
+    if (mod && e.altKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) return hit(() => { setLevel(note, e.code === 'BracketRight' ? 1 : -1); refresh(); });
+    const cell = e.key === 'Tab' && !mod && cellAt(body); if (cell) return hit(() => tableTab(cell, e.shiftKey) && touch());
+  };
+  body.onclick = async e => {
+    const img = e.target.closest('img'); if (img && body.contains(img)) return selectImg(img);
+    selectImg(null);
+    const cb = e.target.closest('input[type=checkbox]');
+    if (cb) { cb.toggleAttribute('checked', cb.checked); return touch(); }
+    const a = e.target.closest('a');
+    if (a && (e.ctrlKey || e.metaKey || CAP)) return openLink(a.href);
+    const m = e.target.closest('.math');
+    if (m) {
+      const t = await ask('Edit LaTeX (empty to remove)', m.dataset.tex, true); if (t === null) return;
+      if (t.trim()) { m.dataset.tex = t; renderOne(m); } else m.remove();
+      touch();
+    }
+  };
+  const tb = $('.tb', el);
+  const restore = r => { body.focus(); if (r) { const s = getSelection(); s.removeAllRanges(); s.addRange(r); } };
+  const below = b => { const r = b.getBoundingClientRect(); return { preventDefault() { }, clientX: r.left, clientY: r.bottom + 4 }; };
+  const updateState = () => { // light up active formatting + show the current text style
+    ['bold', 'italic', 'underline', 'strikeThrough'].forEach(c => tb.querySelector(`[data-c=${c}]`).classList.toggle('on', document.queryCommandState(c)));
+    const n = getSelection().anchorNode; if (!n || !body.contains(n)) return;
+    const t = (n.nodeType === 3 ? n.parentElement : n).closest('h1,h2,h3,blockquote,pre')?.tagName.toLowerCase() || 'p';
+    tb.querySelector('.tsl').textContent = STYLES.find(s => s[0] === t)[1];
+  };
+  body.addEventListener('keyup', updateState); body.addEventListener('mouseup', updateState);
+  $('#drawBtn', el).onclick = e => { const row = $('.inkrow', el); row.hidden = !row.hidden; S.settings.inkRow = !row.hidden; e.currentTarget.classList.toggle('on', !row.hidden); save(); ink.fit(); };
+  tb.onmousedown = e => e.preventDefault(); // keep the text selection
+  tb.onclick = async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const c = b.dataset.c, range = curRange();
+    if (c === 'style') return ctxMenu(below(b), STYLES.map(([v, t, css, k]) => [`<span style="flex:1;${css}">${t}</span>${k ? `<kbd>${k}</kbd>` : ''}`, () => { restore(range); fmt('formatBlock', v); updateState(); }]));
+    if (c === 'tags') return ctxMenu(below(b), [...Object.entries(NTAGS).map(([k, t], i) => [`${icon(t.ic, 16)}<span style="flex:1">${t.name}</span><kbd>Ctrl+${i + 1}</kbd>`, () => { restore(range); applyTag(k); }]), '-', ['<span style="flex:1;padding-left:26px">Remove tag</span><kbd>Ctrl+0</kbd>', () => { restore(range); applyTag('none'); }]]);
+    if (c === 'hl') return ctxMenu(below(b), [...HL_COLORS.map(([n, col]) => [`<span class="hlsw" style="background:${col}"></span>${n}`, () => { restore(range); highlight(col); }]), '-', ['Remove highlight', () => { restore(range); highlight('transparent'); }]]);
+    if (c === 'image') { picRange = range; return $('#picIn', el).click(); }
+    if (c === 'math' || c === 'mathd') return insertMath(c === 'mathd', range);
+    if (c === 'check') { restore(range); return applyTag('todo'); }
+    if (c === 'table') {
+      restore(range); const cell = cellAt(body); if (cell) return ctxMenu(below(b), tableMenuItems(cell, touch));
+      return dialog('<h3>Insert table</h3><div class="row" style="flex-wrap:nowrap"><label class="cf" style="flex:1">Rows<input type="number" name="r" min="1" max="50" value="3" required></label><label class="cf" style="flex:1">Columns<input type="number" name="c" min="1" max="12" value="3" required></label></div><label class="syncc"><input type="checkbox" name="h" checked> Header row</label>', d => insertAt(range, tableHTML(+d.r, +d.c, !!d.h)));
+    }
+    if (c === 'template') return ctxMenu(below(b), [...PAGE_TEMPLATES.map(([n, t, h]) => [n, () => useTemplate(range, h, t)]), ...S.templates.map(t => [esc(t.name), () => useTemplate(range, safeHTML(t.html))]), '-', ['Save this page as a template…', async () => {
+      const n = await ask('Template name', note.title || 'My template'); if (n?.trim()) { S.templates.push({ id: uid(), name: n.trim(), html: safeHTML(note.html) }); save(); toast('Template saved'); }
+    }], ...S.templates.map(t => [`Remove “${esc(t.name)}”`, () => { S.templates = S.templates.filter(x => x !== t); save(); }])]);
+    if (c === 'cite') {
+      const style = S.settings.citeStyle || 'apa', add = h => insertAt(range, h), name = REF_STYLES.find(x => x[0] === style)[1];
+      return ctxMenu(below(b), [['New citation…', () => citeDialog(null, add)], ...S.refs.slice(-10).map(r => [`<span class="ctxref">${esc(inText(r, style))} ${esc(r.title)}</span>`, () => add(esc(inText(r, style)))]), '-',
+        ...(S.refs.length ? [['Insert reference list', () => { const used = S.refs.filter(r => plain(note.html).includes(inText(r, style))); add(referenceList(style, used.length ? used : S.refs)); }], ['Edit saved citations…', () => ctxMenu(below(b), S.refs.map(r => [esc(r.title), () => citeDialog(r, add)]))]] : []),
+        [`Citation style: ${name}`, () => ctxMenu(below(b), REF_STYLES.map(([k, t]) => [`${k === style ? '✓ ' : ''}${t}`, () => { S.settings.citeStyle = k; save(); }]))]]);
+    }
+    if (c === 'link') {
+      const u = await ask('Link URL', 'https://'); if (!u) return;
+      restore(range); document.execCommand('createLink', false, u);
+    } else document.execCommand(c, false, null);
+    touch(); updateState();
+  };
+  const insertAt = (range, html) => { restore(range); document.execCommand('insertHTML', false, html); touch(); };
+  const useTemplate = (range, html, name) => {
+    if (name && !note.title) note.title = title.value = name;
+    if (plain(note.html)) insertAt(range, html); else { body.innerHTML = html; touch(); }
+  };
+  const highlight = col => { document.execCommand('styleWithCSS', false, true); document.execCommand('hiliteColor', false, col); document.execCommand('styleWithCSS', false, false); touch(); };
+  // pictures: insert (camera on iPad), paste, drop; click one to resize, draw on it or delete it
+  let picRange = null, selImg = null;
+  const imgBar = $('.imgbar', el);
+  const insertPic = async (file, range = picRange) => {
+    const src = await shrinkImage(file, 1600); if (!src) return toast("Couldn't read that picture");
+    const img = Object.assign(document.createElement('img'), { src, className: 'nimg' }); img.style.width = '60%';
+    if (range && body.contains(range.startContainer)) { range.deleteContents(); range.insertNode(img); } else { const p = document.createElement('p'); p.append(img); body.append(p); }
+    touch(); selectImg(img);
+  };
+  $('#picIn', el).onchange = e => { [...e.target.files].forEach(f => insertPic(f)); e.target.value = ''; };
+  body.addEventListener('paste', e => { const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/')); if (!files.length) return; e.preventDefault(); const r = curRange(); files.forEach(f => insertPic(f, r)); });
+  body.addEventListener('drop', e => { const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/')); if (!files.length) return; e.preventDefault(); files.forEach(f => insertPic(f, null)); });
+  const selectImg = img => {
+    selImg?.classList.remove('sel'); selImg = img;
+    if (!img) { imgBar.hidden = true; return; }
+    img.classList.add('sel');
+    imgBar.innerHTML = `${[['S', '30%'], ['M', '50%'], ['L', '75%'], ['Full', '100%']].map(([t, w]) => `<button data-w="${w}" class="${img.style.width === w ? 'on' : ''}">${t}</button>`).join('')}<span class="vs"></span><button data-a="draw">${icon('pen', 14)} Draw on it</button><button data-a="del" title="Delete picture">${icon('trash', 14)}</button>`;
+    imgBar.hidden = false; imgBar.style.top = Math.max(4, img.offsetTop - 46) + 'px'; imgBar.style.left = Math.max(8, img.offsetLeft) + 'px';
+  };
+  body.addEventListener('keydown', () => selImg && selectImg(null));
+  imgBar.onmousedown = e => e.preventDefault();
+  imgBar.onclick = async e => {
+    const b = e.target.closest('button'), img = selImg; if (!b || !img) return;
+    if (b.dataset.w) { img.style.width = b.dataset.w; img.style.maxWidth = '100%'; touch(); return selectImg(img); }
+    if (b.dataset.a === 'del') { const p = img.parentElement; img.remove(); if (p !== body && !p.textContent.trim() && !p.querySelector('img')) p.remove(); selectImg(null); return touch(); }
+    if (b.dataset.a === 'draw') { const out = await annotateImage(img.src); if (out) { img.src = out; touch(); } selectImg(img); }
+  };
+  // right-click (or press-and-hold): format bar where you are + spelling suggestions
+  pageCtx = (x, y, spell) => {
+    const range = curRange(), run = f => () => { restore(range); f(); }, cell = cellAt(body);
+    const sp = spell?.word ? [...(spell.suggestions || []).slice(0, 5).map(s => [`<b>${esc(s)}</b>`, () => { window.native.spellFix(s); setTimeout(touch, 60); }]), [`Add “${esc(spell.word)}” to dictionary`, () => window.native.spellAdd(spell.word)], '-'] : [];
+    ctxMenu({ preventDefault() { }, clientX: x, clientY: y }, [
+      ['row', [['<b>B</b>', run(() => fmt('bold')), 'Bold'], ['<i>I</i>', run(() => fmt('italic')), 'Italic'], ['<u>U</u>', run(() => fmt('underline')), 'Underline'], ['<s>S</s>', run(() => fmt('strikeThrough')), 'Strikethrough'], ['|'],
+        ...HL_COLORS.slice(0, 4).map(([n, col]) => [`<span class="hlsw" style="background:${col}"></span>`, run(() => highlight(col)), `Highlight ${n.toLowerCase()}`]), ['|'],
+        ['H1', run(() => fmt('formatBlock', 'h1')), 'Heading 1'], ['H2', run(() => fmt('formatBlock', 'h2')), 'Heading 2'], ['¶', run(() => fmt('formatBlock', 'p')), 'Normal text'], ['|'],
+        [icon('ul', 16), run(() => fmt('insertUnorderedList')), 'Bulleted list'], [icon('check', 16), run(() => applyTag('todo')), 'To-do'], [icon('link', 15), () => { restore(range); tb.querySelector('[data-c=link]').click(); }, 'Link'], ['<span class="tx">x²</span>', () => insertMath(false, range), 'Equation']]],
+      '-', ...(cell ? [...tableMenuItems(cell, touch), '-'] : []), ...sp,
+      [`${icon('speaker', 15)} Read aloud`, () => speak(range && !range.collapsed ? range.toString() : `${note.title}.\n${speakable(body)}`, $('#ttsBtn', el))],
+      [`${icon('check', 15)} Fix spelling & grammar`, async () => {
+        restore(range); let r = curRange(); if (!r || r.collapsed) { const blk = blockOf(); if (!blk) return; r = document.createRange(); r.selectNodeContents(blk); }
+        // map text offsets to text nodes, then replace only the wrong words (last first) so formatting and undo survive
+        const nodes = [], w = document.createTreeWalker(r.commonAncestorContainer, NodeFilter.SHOW_TEXT); let text = '';
+        for (let n = w.currentNode.nodeType === 3 ? w.currentNode : w.nextNode(); n; n = w.nextNode()) {
+          if (!r.intersectsNode(n)) continue;
+          const a = n === r.startContainer ? r.startOffset : 0, b = n === r.endContainer ? r.endOffset : n.length;
+          nodes.push({ n, a, at: text.length }); text += n.data.slice(a, b);
+        }
+        const fixes = text.trim() && await grammarFixes(text); if (!fixes) return;
+        if (!fixes.length) return toast('No mistakes found');
+        const pos = o => { const k = nodes.findLast(x => x.at <= o); return [k.n, k.a + o - k.at]; };
+        const s = getSelection();
+        for (const f of fixes.sort((x, y) => y.at - x.at)) { const q = document.createRange(); q.setStart(...pos(f.at)); q.setEnd(...pos(f.at + f.len)); s.removeAllRanges(); s.addRange(q); document.execCommand('insertText', false, f.rep); }
+        touch(); toast(`Fixed ${fixes.length} ${fixes.length === 1 ? 'mistake' : 'mistakes'}`);
+      }],
+      [`${icon('image', 15)} Insert picture`, () => { picRange = range; $('#picIn', el).click(); }], '-',
+      ['Cut', run(() => document.execCommand('cut'))], ['Copy', run(() => document.execCommand('copy'))], ['Paste', () => { restore(range); window.native?.paste ? window.native.paste() : toast('Use Ctrl+V to paste'); }]
+    ]);
+  };
+  body.addEventListener('contextmenu', e => { if (window.native?.onCtx) return; e.preventDefault(); pageCtx(e.clientX, e.clientY, null); }); // without Electron (iPad web app) show it directly
+  $('#ttsBtn', el).onmousedown = e => e.preventDefault(); // keep the selection
+  $('#ttsBtn', el).onclick = e => { const r = curRange(); speak(r && !r.collapsed ? r.toString() : `${note.title}.\n${speakable(body)}`, e.currentTarget); };
+  $('#expBtn', el).onclick = e => {
+    const sec = secOf(note.sectionId), nb = S.notebooks.find(n => n.id === note.notebookId);
+    ctxMenu(below(e.currentTarget), [['This page as PDF', () => exportPages(note.title || 'Untitled page', [note])],
+      ...(sec ? [[`Section “${esc(sec.name)}” as PDF`, () => exportPages(sec.name, pagesOf(sec.id))]] : []),
+      ...(nb ? [[`Whole notebook “${esc(nb.name)}” as PDF`, () => exportNotebook(nb)]] : [])]);
+  };
+  insertImageIntoNote = (src, alt) => { const p = document.createElement('p'), img = Object.assign(document.createElement('img'), { src, alt }); img.style.cssText = 'max-width:100%;border-radius:10px'; p.append(img); body.append(p); touch(); };
+  insertIntoNote = text => {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = text.trim().split(/\n{2,}/).map(p => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+    mathify(wrap); body.append(...wrap.childNodes); touch();
+  };
+  $('#nbSel', el).onchange = e => {
+    const s = secOf(e.target.value); Object.assign(note, { sectionId: s.id, notebookId: s.notebookId, level: 0, order: Date.now() }); save();
+    if (view === 'nb') location.hash = pageHref(note); else route();
+  };
+  const paper = () => { body.className = `body paper-${note.paper || 'blank'} pc-${note.pcolor || 'dark'}`; save(); ink.fit(); };
+  $('#paperSel', el).onchange = e => { note.paper = e.target.value; paper(); };
+  $('#pcSel', el).onchange = e => { note.pcolor = e.target.value; paper(); };
+  $('#delNote', el).onclick = async () => { if (confirm(`Move "${note.title || 'Untitled'}" to the trash?`)) { await trashNote(note); location.hash = base; route(); } };
+  if (pendingHeading != null) { body.querySelectorAll('h1,h2,h3')[pendingHeading]?.scrollIntoView(); pendingHeading = null; }
+  if (!note.title && !note.html) title.focus();
+}
+
+function autoMath() { // runs when "$" is typed: converts $..$ / $$..$$ ending at the caret
+  const s = getSelection(), node = s.anchorNode;
+  if (!node || node.nodeType !== 3) return;
+  const before = node.data.slice(0, s.anchorOffset);
+  let m = before.match(/\$\$([^$]+)\$\$$/), start, tex, display = true;
+  if (m) { start = before.length - m[0].length; tex = m[1]; }
+  else if ((m = before.match(/(^|[^$\\])\$([^$\s](?:[^$]*[^$\s])?)\$$/))) { start = before.length - m[0].length + m[1].length; tex = m[2]; display = false; }
+  else return;
+  const r = document.createRange(); r.setStart(node, start); r.setEnd(node, s.anchorOffset); r.deleteContents();
+  const chip = mathChip(tex, display), sp = document.createTextNode('\u00a0');
+  r.insertNode(sp); r.insertNode(chip); s.collapse(sp, 1);
+}
+
+/* ---------- tasks ---------- */
+function taskRows(list) {
+  const T = today();
+  return list.map(t => `<div class="task${t.done ? ' done' : ''}${!t.done && t.due && t.due < T ? ' over' : ''}" data-id="${t.id}"><input type="checkbox"${t.done ? ' checked' : ''}><input class="tt" value="${esc(t.title)}"><input type="date" class="td" value="${t.due || ''}"><button class="x" title="Delete">✕</button></div>`).join('');
+}
+function bindTasks(el, rerender) {
+  el.onchange = e => {
+    const row = e.target.closest('.task'); if (!row) return;
+    const t = S.tasks.find(x => x.id === row.dataset.id);
+    if (e.target.type === 'checkbox') t.done = e.target.checked;
+    else if (e.target.type === 'date') t.due = e.target.value;
+    else t.title = e.target.value;
+    save(); rerender(); renderSide(view);
+  };
+  el.onclick = e => { if (e.target.classList.contains('x')) { S.tasks = S.tasks.filter(x => x.id !== e.target.closest('.task').dataset.id); save(); rerender(); renderSide(view); } };
+}
+const byDue = (a, b) => (a.due || '9999').localeCompare(b.due || '9999') || a.created - b.created;
+function addTaskForm(form, rerender) {
+  form.onsubmit = e => {
+    e.preventDefault(); const f = new FormData(form), title = f.get('t').trim(); if (!title) return;
+    S.tasks.push({ id: uid(), title, due: f.get('d') || '', done: false, created: Date.now() });
+    save(); form.reset(); rerender(); renderSide(view);
+  };
+}
+function viewTasks() {
+  main.innerHTML = `<div class="page"><h1>Tasks</h1><form id="addT" class="row" style="margin:14px 0"><input name="t" placeholder="Add a task…" style="flex:1" autofocus><input type="date" name="d" value="${today()}" title="Due date (today by default — clear it for no date)"><button class="pri">Add</button></form><div id="tl"></div></div>`;
+  const draw = () => {
+    const T = today(), g = { Overdue: [], Today: [], Upcoming: [], 'No date': [], Completed: [] };
+    for (const t of S.tasks) g[t.done ? 'Completed' : !t.due ? 'No date' : t.due < T ? 'Overdue' : t.due === T ? 'Today' : 'Upcoming'].push(t);
+    $('#tl').innerHTML = Object.entries(g).filter(([, v]) => v.length).map(([k, v]) => `<div class="tgroup">${k} · ${v.length}</div>${taskRows(v.sort(byDue))}`).join('') || '<p class="mut">No tasks yet.</p>';
+  };
+  bindTasks($('#tl'), draw); addTaskForm($('#addT'), draw); draw();
+}
+
+/* ---------- calendar subscriptions (.ics) ---------- */
+function icsDate(v, params = []) {
+  const y = +v.slice(0, 4), m = +v.slice(4, 6) - 1, d = +v.slice(6, 8);
+  if (params.includes('VALUE=DATE') || v.length === 8) return { d: new Date(y, m, d), allDay: true };
+  const H = +v.slice(9, 11), M = +v.slice(11, 13), s = +v.slice(13, 15);
+  // ponytail: TZID times are read as this computer's local time; exact when the calendar uses your timezone
+  return { d: v.endsWith('Z') ? new Date(Date.UTC(y, m, d, H, M, s)) : new Date(y, m, d, H, M, s), allDay: false };
+}
+function parseICS(text) {
+  const out = []; let ev = null;
+  const unesc = s => s.replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1');
+  for (const l of text.replace(/\r?\n[ \t]/g, '').split(/\r?\n/)) {
+    if (l === 'BEGIN:VEVENT') ev = { exdate: [] };
+    else if (l === 'END:VEVENT') { if (ev?.start) out.push(ev); ev = null; }
+    else if (ev) {
+      const i = l.indexOf(':'); if (i < 0) continue;
+      const [name, ...params] = l.slice(0, i).split(';'), val = l.slice(i + 1);
+      if (name === 'SUMMARY') ev.title = unesc(val);
+      else if (name === 'DTSTART') ev.start = icsDate(val, params);
+      else if (name === 'LOCATION') ev.loc = unesc(val);
+      else if (name === 'UID') ev.uid = val;
+      else if (name === 'STATUS') ev.status = val;
+      else if (name === 'RRULE') ev.rrule = Object.fromEntries(val.split(';').map(p => p.split('=')));
+      else if (name === 'EXDATE') val.split(',').forEach(x => ev.exdate.push(+icsDate(x, params).d));
+      else if (name === 'RECURRENCE-ID') ev.recId = +icsDate(val, params).d;
+    }
+  }
+  for (const o of out) if (o.recId) out.find(m => m.uid === o.uid && !m.recId)?.exdate.push(o.recId); // moved or cancelled occurrences
+  return out.filter(o => o.status !== 'CANCELLED');
+}
+function expand(ev, from, to) { // occurrences of one event inside [from, to]
+  const s = ev.start.d, res = [], add = d => { if (d >= from && d <= to && !ev.exdate.includes(+d)) res.push(d); };
+  const r = ev.rrule; if (!r) { add(s); return res; }
+  // ponytail: covers DAILY/WEEKLY(+BYDAY)/MONTHLY/YEARLY with INTERVAL/COUNT/UNTIL; "2nd Tuesday"-style rules repeat on the start's day of month
+  const iv = +(r.INTERVAL || 1), until = r.UNTIL ? icsDate(r.UNTIL).d : to, count = +(r.COUNT || Infinity);
+  const days = r.FREQ === 'WEEKLY' && r.BYDAY ? r.BYDAY.split(',').map(x => ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'].indexOf(x.slice(-2))) : null;
+  let n = 0;
+  for (let i = 0; i < 50000 && n < count; i++) { // counts from the first occurrence, so an old daily event needs many steps
+    const b = new Date(s);
+    if (r.FREQ === 'DAILY') b.setDate(s.getDate() + i * iv);
+    else if (r.FREQ === 'WEEKLY') b.setDate(s.getDate() + i * 7 * iv);
+    else if (r.FREQ === 'MONTHLY') b.setMonth(s.getMonth() + i * iv);
+    else if (r.FREQ === 'YEARLY') b.setFullYear(s.getFullYear() + i * iv);
+    else { add(s); break; }
+    if (b > until || b > to) break;
+    if (b.getDate() !== s.getDate() && r.FREQ !== 'DAILY' && r.FREQ !== 'WEEKLY') continue; // no 31 Feb: the month is skipped, not rolled into March
+    if (!days) { n++; add(b); continue; }
+    const sun = new Date(b); sun.setDate(b.getDate() - b.getDay());
+    for (const wd of days.sort()) { const d = new Date(sun); d.setDate(sun.getDate() + wd); if (d < s || d > until || n >= count) continue; n++; add(d); }
+  }
+  return res;
+}
+let syncing = false;
+const fetchText = async url => { // the desktop app fetches outside the page; a web page only gets calendars whose server allows it (CORS) — Google and iCloud don't
+  if (NATIVE) return window.native.fetchText(url);
+  url = String(url).trim().replace(/^webcal:/i, 'https:');
+  let r; try { r = await fetch(url, { signal: AbortSignal.timeout(30000) }); } catch { throw new Error('this calendar server blocks web apps — calendar sync needs the desktop app'); }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.text();
+};
+async function syncCals() {
+  if (syncing || !S.settings.cals.length) return; syncing = true;
+  const from = new Date(Date.now() - 120 * 864e5), to = new Date(Date.now() + 400 * 864e5);
+  for (const c of S.settings.cals) {
+    try {
+      S.ics[c.id] = parseICS(await fetchText(c.url)).flatMap(ev => expand(ev, from, to).map(d => ({ title: ev.title || '(no title)', loc: ev.loc || '', date: ymd(d), time: ev.start.allDay ? '' : hm(d) })));
+      c.err = ''; c.synced = Date.now();
+    } catch (e) { c.err = e.message.replace(/^Error invoking remote method '\w+': (Error: )?/, ''); }
+  }
+  syncing = false; save();
+  if (['home', 'calendar', 'settings'].includes(view)) route();
+}
+setInterval(syncCals, 30 * 60e3);
+const icsOn = ds => S.settings.cals.filter(c => !c.hidden).flatMap(c => (S.ics[c.id] || []).filter(o => o.date === ds).map(o => ({ ...o, color: c.color, cal: c.name })));
+
+/* ---------- calendar ---------- */
+const WEEK_START = 1; // 0 = Sunday, 1 = Monday
+const dows = () => Array.from({ length: 7 }, (_, i) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][(i + WEEK_START) % 7]);
+const monthDays = m => { const s = new Date(m.getFullYear(), m.getMonth(), 1 - (m.getDay() - WEEK_START + 7) % 7); return Array.from({ length: 42 }, (_, i) => new Date(s.getFullYear(), s.getMonth(), s.getDate() + i)); };
+function dayItems(ds) {
+  const byTime = (a, b) => (a.time || '').localeCompare(b.time || '');
+  return S.events.filter(e => e.date === ds).sort(byTime).map(e => `<div class="ev" data-e="${e.id}">${e.time ? e.time + ' ' : ''}${esc(e.title)}</div>`).join('')
+    + icsOn(ds).sort(byTime).map(o => `<div class="ev" data-g="${esc(JSON.stringify(o))}" style="background:${o.color}33;border-left:3px solid ${o.color}" title="${esc(o.cal)}">${o.time ? o.time + ' ' : ''}${esc(o.title)}</div>`).join('')
+    + S.tasks.filter(t => t.due === ds).map(t => `<div class="ev task${t.done ? ' done' : ''}" data-t="${t.id}">${t.done ? '☑' : '☐'} ${esc(t.title)}</div>`).join('');
+}
+const hasItems = ds => S.events.some(e => e.date === ds) || S.tasks.some(t => t.due === ds && !t.done) || icsOn(ds).length > 0;
+function eventDialog(ev, date) {
+  const isNew = !ev; ev ||= { id: uid(), title: '', date, time: '', notes: '' };
+  dialog(`<h3>${isNew ? 'New event' : 'Edit event'}</h3><input name="title" required placeholder="Title" value="${esc(ev.title)}"><div class="row"><input type="date" name="date" required value="${ev.date}" style="flex:1"><input type="time" name="time" value="${ev.time || ''}"></div><textarea name="notes" rows="3" placeholder="Notes">${esc(ev.notes || '')}</textarea>`,
+    data => { Object.assign(ev, data); if (isNew) S.events.push(ev); save(); route(); },
+    isNew ? null : () => { S.events = S.events.filter(x => x !== ev); save(); route(); });
+}
+function itemClick(e) { // shared by full and mini calendar
+  const ev = e.target.closest('[data-e]'), t = e.target.closest('[data-t]'), g = e.target.closest('[data-g]');
+  if (ev) { eventDialog(S.events.find(x => x.id === ev.dataset.e)); return true; }
+  if (t) { const task = S.tasks.find(x => x.id === t.dataset.t); task.done = !task.done; save(); route(); return true; }
+  if (g) {
+    const o = JSON.parse(g.dataset.g);
+    dialog(`<h3>${esc(o.title)}</h3><p class="mut" style="margin:0">${new Date(o.date + 'T00:00').toLocaleDateString(LOC, { weekday: 'long', month: 'long', day: 'numeric' })}${o.time ? ' · ' + o.time : ' · all day'}</p>${o.loc ? `<p style="margin:0">${esc(o.loc)}</p>` : ''}<small>From “${esc(o.cal)}” (read-only — edit it in that calendar)</small>`);
+    return true;
+  }
+}
+let calM = firstOf(new Date());
+function viewCalendar() {
+  const T = today();
+  const ym = ymd(calM).slice(0, 7), nEv = S.events.filter(e => e.date.startsWith(ym)).length + S.settings.cals.filter(c => !c.hidden).reduce((a, c) => a + (S.ics[c.id] || []).filter(o => o.date.startsWith(ym)).length, 0), nTk = S.tasks.filter(t => !t.done && t.due?.startsWith(ym)).length;
+  main.innerHTML = `<div class="page" style="max-width:1300px"><div class="vhead"><span class="hico">${icon('calendar', 20)}</span><div class="htitle"><h1>${calM.toLocaleDateString(LOC, { month: 'long', year: 'numeric' })}</h1><small>${nEv} event${nEv === 1 ? '' : 's'} · ${nTk} task${nTk === 1 ? '' : 's'} due this month</small></div><span style="flex:1"></span>
+    ${S.settings.cals.length ? `<button id="cs" class="ibtn" title="Sync subscribed calendars">${icon('sync', 16)} Sync</button>` : `<a class="btn ibtn" href="#/settings" title="Add your Google / Outlook / iCloud calendar link">${icon('link', 16)} Connect calendar</a>`}
+    <div class="seg"><button id="cp" title="Previous month">${icon('left', 16)}</button><button id="ct" title="Jump to this month">Today</button><button id="cn" title="Next month">${icon('right', 16)}</button></div><button class="pri ibtn" id="ce">${icon('plus', 16)} Event</button></div>
+    ${S.settings.cals.length ? `<div class="legend" id="legend">${S.settings.cals.map(c => `<label title="${c.err ? esc(c.err) : 'Show / hide'}"><input type="checkbox" data-cal="${c.id}"${c.hidden ? '' : ' checked'} style="accent-color:${c.color}"><span class="cdot" style="background:${c.color}"></span>${esc(c.name)}${c.err ? ' ⚠' : ''}</label>`).join('')}<a class="btn" href="#/settings" style="font-size:12px;padding:3px 10px">＋ Add calendar</a></div>` : ''}
+    <div class="cal" id="cal">${dows().map(d => `<div class="dow">${d}</div>`).join('')}${monthDays(calM).map(d => { const ds = ymd(d); return `<div data-d="${ds}" class="${d.getMonth() !== calM.getMonth() ? 'out' : ''}${ds === T ? ' td' : ''}"><span class="dn">${d.getDate()}</span>${dayItems(ds)}</div>`; }).join('')}</div></div>`;
+  const shift = n => { calM = new Date(calM.getFullYear(), calM.getMonth() + n, 1); viewCalendar(); };
+  $('#cp').onclick = () => shift(-1); $('#cn').onclick = () => shift(1);
+  $('#ct').onclick = () => { calM = firstOf(new Date()); viewCalendar(); };
+  $('#ce').onclick = () => eventDialog(null, T);
+  if ($('#cs')) $('#cs').onclick = () => { $('#cs').textContent = 'Syncing…'; syncCals(); };
+  if ($('#legend')) $('#legend').onchange = e => { const c = S.settings.cals.find(x => x.id === e.target.dataset.cal); if (c) { c.hidden = !e.target.checked; save(); viewCalendar(); } };
+  $('#cal').onclick = e => { if (itemClick(e)) return; const d = e.target.closest('[data-d]'); if (d) eventDialog(null, d.dataset.d); };
+}
+
+/* ---------- home: widget board ---------- */
+let miniM = firstOf(new Date()), miniSel = today();
+const dayLabel = ds => { const d = new Date(), t = new Date(); t.setDate(d.getDate() + 1); return ds === ymd(d) ? 'Today' : ds === ymd(t) ? 'Tomorrow' : new Date(ds + 'T00:00').toLocaleDateString(LOC, { weekday: 'long', month: 'short', day: 'numeric' }); };
+const errText = e => e.message.replace(/^Error invoking remote method '\w+': (Error: )?/, '');
+
+// focus timer keeps running while you move around the app
+const focus = { secs: 1500, left: 1500, running: false, phase: 'Focus', task: '' };
+function drawFocus() {
+  const el = document.querySelector('.focusw'); if (!el) return;
+  el.querySelector('.ft').textContent = `${String(focus.left / 60 | 0).padStart(2, '0')}:${String(focus.left % 60).padStart(2, '0')}`;
+  el.querySelector('.fp').textContent = focus.phase + (focus.task ? ' · ' + focus.task : '');
+  el.querySelector('[data-go]').textContent = focus.running ? 'Pause' : 'Start';
+  el.querySelector('.fbar').style.width = 100 * (1 - focus.left / focus.secs) + '%';
+}
+setInterval(() => {
+  if (!focus.running) return;
+  if (--focus.left <= 0) {
+    const done = focus.phase === 'Focus';
+    if (done) { (S.focusLog ||= []).push({ at: Date.now(), mins: focus.secs / 60, task: focus.task }); save(); }
+    const msg = done ? 'Focus session done — take a 5 minute break' : 'Break over — back to it';
+    try { new Notification(msg); } catch { toast(msg); } // Safari on iPad has no page notifications
+    focus.phase = done ? 'Break' : 'Focus'; focus.secs = focus.left = (done ? 5 : 25) * 60;
+  }
+  drawFocus();
+}, 1000);
+
+// flashcards: "Q: … A: …" lines in notes and .md files, Leitner boxes for spacing
+const CARD_DAYS = [0, 1, 3, 7, 14, 30, 60];
+const noteText = html => plain((html || '').replace(/<span[^>]*class="math"[^>]*>(<\/span>)?/g, m => { const t = m.match(/data-tex="([^"]*)"/)?.[1] || ''; return /data-display="1"/.test(m) ? ` $$${t}$$ ` : ` $${t}$ `; })).replace(/&quot;/g, '"');
+function allCards() {
+  const out = [], scan = (text, src) => { for (const m of (text + ' ').matchAll(/Q:\s*(.+?)\s*A:\s*(.+?)(?=\s*Q:|$)/gs)) out.push({ key: src + '|' + m[1].trim(), q: m[1].trim(), a: m[2].trim(), src }); };
+  openNotes().forEach(n => scan(noteText(n.html), n.title || 'Untitled'));
+  S.files.filter(f => f.type === 'md').forEach(f => scan(f.text.replace(/\s+/g, ' '), f.name));
+  return out;
+}
+const streak = h => { let n = 0; const d = new Date(); if (!h.days[ymd(d)]) d.setDate(d.getDate() - 1); while (h.days[ymd(d)]) { n++; d.setDate(d.getDate() - 1); } return n; };
+
+// each widget: name (settings), col (default column), make() -> { title, tools, body, bind(widgetEl) }
+const WIDGETS = {
+  notes: { name: 'Recent notes', col: 0, make: () => ({
+    title: '<a href="#/notes">Notes ›</a>',
+    body: `<div class="cards">${[...openNotes()].sort((a, b) => b.updated - a.updated).slice(0, 5).map(n => `<a class="card" href="${pageHref(n)}"><small>${esc(nbName(n.notebookId))} › ${esc(secOf(n.sectionId)?.name || '')}</small><b>${esc(n.title || 'Untitled')}</b><p>${esc(plain(n.html).slice(0, 140))}</p><small>${ago(n.updated)}</small></a>`).join('')}<button class="card newc" data-new><span class="dot">${icon('noteplus', 22)}</span>Create new note</button></div>`,
+    bind: w => w.querySelector('[data-new]').onclick = () => newNote()
+  }) },
+  calendar: { name: 'Calendar', col: 0, make: () => ({
+    title: '<a href="#/calendar">Calendar ›</a>', tools: '<span class="mut" data-ml></span><button data-mp>‹</button><button data-mn>›</button>',
+    body: '<section class="box hcal"><div class="mini"></div><div class="agenda"></div></section>',
+    bind: w => {
+      const q = s => w.querySelector(s);
+      const mini = () => {
+        const T = today();
+        q('[data-ml]').textContent = miniM.toLocaleDateString(LOC, { month: 'long', year: 'numeric' });
+        q('.mini').innerHTML = dows().map(d => `<span class="h">${d[0]}</span>`).join('') + monthDays(miniM).map(d => {
+          const ds = ymd(d);
+          return `<span data-d="${ds}" class="${d.getMonth() !== miniM.getMonth() ? 'out ' : ''}${ds === T ? 'tdy ' : ''}${ds === miniSel ? 'sel ' : ''}${hasItems(ds) ? 'has' : ''}">${d.getDate()}</span>`;
+        }).join('');
+        q('.agenda').innerHTML = `<div class="row" style="margin-bottom:4px"><b style="flex:1">${dayLabel(miniSel)}</b><button data-ae>＋ Event</button></div>${dayItems(miniSel) || '<p class="mut" style="margin:4px 0">Nothing scheduled.</p>'}`;
+        q('[data-ae]').onclick = () => eventDialog(null, miniSel);
+      };
+      q('.mini').onclick = e => { const d = e.target.closest('[data-d]'); if (d) { miniSel = d.dataset.d; mini(); } };
+      q('.agenda').onclick = itemClick;
+      q('[data-mp]').onclick = () => { miniM = new Date(miniM.getFullYear(), miniM.getMonth() - 1, 1); mini(); };
+      q('[data-mn]').onclick = () => { miniM = new Date(miniM.getFullYear(), miniM.getMonth() + 1, 1); mini(); };
+      mini();
+    }
+  }) },
+  upcoming: { name: 'Upcoming 7 days', col: 0, make: () => {
+    const T = today(), over = S.tasks.filter(t => !t.done && t.due && t.due < T);
+    const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return ymd(d); });
+    const html = (over.length ? `<div class="tgroup" style="margin-top:0;color:#ff7b7b">Overdue</div>${over.map(t => `<div class="ev task" data-t="${t.id}">☐ ${esc(t.title)} <small>${t.due}</small></div>`).join('')}` : '')
+      + days.map(ds => { const it = dayItems(ds); return it ? `<div class="tgroup">${dayLabel(ds)}</div>${it}` : ''; }).join('');
+    return { title: 'Upcoming', tools: '<small>next 7 days</small>', body: `<section class="box upc">${html || '<p class="mut" style="margin:0">Nothing in the next 7 days.</p>'}</section>`, bind: w => w.querySelector('.upc').onclick = itemClick };
+  } },
+  files: { name: 'Recent files', col: 0, make: () => ({
+    title: '<a href="#/files">Files ›</a>', tools: '<label class="btn" title="Add PDF, Markdown or PowerPoint">＋ Add<input type="file" accept=".pdf,.md,.markdown,.pptx" multiple hidden></label>',
+    body: `<section class="box">${[...S.files].sort((a, b) => b.added - a.added).slice(0, 6).map(f => `<a class="frow" href="#/files/${f.id}"><span class="ftype ${f.type}">${f.type.toUpperCase()}</span><span class="fn">${esc(f.name)}</span>${f.tags.slice(0, 3).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}<small>${ago(f.added)}</small></a>`).join('') || '<p class="mut" style="margin:0">No files yet — add PDFs, Markdown or slides.</p>'}</section>`,
+    bind: w => w.querySelector('input[type=file]').onchange = e => addFiles(e.target.files)
+  }) },
+  boards: { name: 'Recent whiteboards', col: 0, make: () => ({
+    title: '<a href="#/boards">Whiteboards ›</a>',
+    body: `<div class="strip">${[...S.boards].sort((a, b) => b.updated - a.updated).slice(0, 6).map(b => `<a class="card bcard" href="#/board/${b.id}">${b.thumb ? `<img src="${esc(b.thumb)}">` : '<div class="blank"></div>'}<b>${esc(b.name)}</b></a>`).join('')}<button class="card newc" data-nb><span class="dot">${icon('pen', 20)}</span>New whiteboard</button></div>`,
+    bind: w => w.querySelector('[data-nb]').onclick = newBoard
+  }) },
+  pinned: { name: 'Pinned note', col: 0, make: () => {
+    const n = openNotes().find(x => x.id === S.settings.pinned);
+    return {
+      title: 'Pinned note', tools: `<select data-pin style="max-width:180px"><option value="">Choose a note…</option>${openNotes().map(x => `<option value="${x.id}"${x === n ? ' selected' : ''}>${esc(x.title || 'Untitled')}</option>`).join('')}</select>${n ? `<a class="btn" href="#/notes/${n.id}">Open</a>` : ''}`,
+      body: `<section class="box"><div class="body pinbody"${n ? ' contenteditable="true"' : ''}>${n ? n.html : '<p class="mut">Pick a note to keep it open here — you can edit it in place.</p>'}</div></section>`,
+      bind: w => {
+        w.querySelector('[data-pin]').onchange = e => { S.settings.pinned = e.target.value; save(); viewHome(); };
+        const b = w.querySelector('.pinbody'); b.querySelectorAll('.math').forEach(renderOne);
+        if (n) b.oninput = () => { const c = b.cloneNode(true); c.querySelectorAll('.math').forEach(m => { m.textContent = ''; m.removeAttribute('contenteditable'); }); n.html = c.innerHTML; n.updated = Date.now(); save(); };
+      }
+    };
+  } },
+  flashcards: { name: 'Flashcards', col: 0, make: () => {
+    const cards = allCards(), st = S.cards ||= {}, T = today();
+    const due = cards.filter(c => (st[c.key]?.due || '') <= T).sort((a, b) => (st[a.key]?.seen || 0) - (st[b.key]?.seen || 0)), c = due[0];
+    return {
+      title: 'Flashcards', tools: `<small>${due.length} due · ${cards.length} cards</small>`,
+      body: `<section class="box fc">${c ? `<div class="fq">${esc(c.q)}</div><div class="fa" hidden>${esc(c.a)}</div><div class="row"><button class="pri" data-show>Show answer</button><button data-again hidden>Again</button><button class="pri" data-good hidden>Got it</button><small style="margin-left:auto">${esc(c.src)}</small></div>`
+        : `<p class="mut" style="margin:0">${cards.length ? 'All caught up for today' : 'Write lines like <b>Q: What is entropy? A: $dS = dQ/T$</b> in any note or .md file — they show up here as cards.'}</p>`}</section>`,
+      bind: w => {
+        if (!c) return; const q = s => w.querySelector(s); mathify(q('.fc'));
+        q('[data-show]').onclick = () => { q('.fa').hidden = false; q('[data-show]').hidden = true; q('[data-again]').hidden = q('[data-good]').hidden = false; };
+        const grade = ok => { const box = ok ? Math.min((st[c.key]?.box || 0) + 1, CARD_DAYS.length - 1) : 0, d = new Date(); d.setDate(d.getDate() + CARD_DAYS[box]); st[c.key] = { box, due: ok ? ymd(d) : T, seen: Date.now() }; save(); viewHome(); };
+        q('[data-again]').onclick = () => grade(false); q('[data-good]').onclick = () => grade(true);
+      }
+    };
+  } },
+  tasks: { name: 'Tasks', col: 1, make: () => ({
+    title: '<a href="#/tasks">Tasks ›</a>', tools: `<small>${S.tasks.filter(t => !t.done).length} open</small>`,
+    body: '<section class="box"><form class="row" style="flex-wrap:nowrap;margin-bottom:6px"><input name="t" placeholder="Quick task…" style="flex:1;min-width:0"><input type="date" name="d" value="' + today() + '" style="width:130px"><button>Add</button></form><div class="hlist"></div></section>',
+    bind: w => { const el = w.querySelector('.hlist'), draw = () => { el.innerHTML = taskRows(S.tasks.filter(t => !t.done).sort(byDue).slice(0, 10)) || '<p class="mut">Nothing to do</p>'; }; bindTasks(el, draw); addTaskForm(w.querySelector('form'), draw); draw(); }
+  }) },
+  scratch: { name: 'Scratch pad', col: 1, make: () => ({
+    title: 'Scratch pad', tools: '<button data-s2n>Save as note</button><button data-clr>Clear</button>',
+    body: `<section class="box scratch"><textarea placeholder="Start writing…">${esc(S.scratch)}</textarea></section>`,
+    bind: w => {
+      const sc = w.querySelector('textarea'); sc.oninput = () => { S.scratch = sc.value; save(); };
+      w.querySelector('[data-clr]').onclick = () => { if (sc.value && confirm('Clear the scratch pad?')) { sc.value = S.scratch = ''; save(); } };
+      w.querySelector('[data-s2n]').onclick = () => {
+        if (!sc.value.trim()) return;
+        const sec = defaultSection();
+        S.notes.push({ id: uid(), title: 'Scratch ' + new Date().toLocaleString(LOC), notebookId: sec.notebookId, sectionId: sec.id, level: 0, order: Date.now(), created: Date.now(), updated: Date.now(), html: sc.value.split('\n').map(l => `<p>${esc(l) || '<br>'}</p>`).join('') });
+        S.scratch = ''; save(); route();
+      };
+    }
+  }) },
+  focus: { name: 'Focus timer', col: 1, make: () => {
+    const T = today(), mins = (S.focusLog || []).filter(l => ymd(new Date(l.at)) === T).reduce((a, l) => a + l.mins, 0);
+    return {
+      title: 'Focus timer', tools: `<small>${mins} min focused today</small>`,
+      body: `<section class="box focusw"><div class="row" style="flex-wrap:nowrap"><div class="ft"></div><div style="flex:1;min-width:0"><div class="fp mut"></div><div class="fbarw"><div class="fbar"></div></div></div></div>
+        <div class="row" style="margin-top:12px;flex-wrap:nowrap"><select data-task style="flex:1;min-width:0"><option value="">No task</option>${S.tasks.filter(t => !t.done).map(t => `<option${t.title === focus.task ? ' selected' : ''}>${esc(t.title)}</option>`).join('')}</select><select data-min title="Minutes">${[15, 25, 45, 50, 90].map(m => `<option value="${m}"${m * 60 === focus.secs ? ' selected' : ''}>${m}m</option>`).join('')}</select><button class="pri" data-go></button><button data-reset>Reset</button></div></section>`,
+      bind: w => {
+        const q = s => w.querySelector(s), set = () => { focus.running = false; focus.phase = 'Focus'; focus.secs = focus.left = +q('[data-min]').value * 60; drawFocus(); };
+        q('[data-go]').onclick = () => { focus.running = !focus.running; if (focus.running && window.Notification?.permission === 'default') Notification.requestPermission(); drawFocus(); };
+        q('[data-reset]').onclick = set; q('[data-min]').onchange = () => { if (!focus.running) set(); };
+        q('[data-task]').onchange = e => { focus.task = e.target.value; drawFocus(); };
+        drawFocus();
+      }
+    };
+  } },
+  habits: { name: 'Habit tracker', col: 1, make: () => {
+    const H = S.habits ||= [], days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - 6 + i); return d; });
+    return {
+      title: 'Habits', tools: '<button data-add>＋ Habit</button>',
+      body: `<section class="box">${H.length ? `<table class="hab"><tr><th></th>${days.map(d => `<th>${'SMTWTFS'[d.getDay()]}<br><small>${d.getDate()}</small></th>`).join('')}<th></th></tr>${H.map(h => `<tr><td>${esc(h.name)}<br><small>${streak(h)} day streak</small></td>${days.map(d => `<td><input type="checkbox" data-h="${h.id}" data-d="${ymd(d)}"${h.days[ymd(d)] ? ' checked' : ''}></td>`).join('')}<td><button class="x" data-rm="${h.id}" title="Remove">✕</button></td></tr>`).join('')}</table>` : '<p class="mut" style="margin:0">Track daily habits — e.g. “Read 20 pages”, “Gym”, “Review flashcards”.</p>'}</section>`,
+      bind: w => {
+        const box = w.querySelector('.box');
+        w.querySelector('[data-add]').onclick = async () => { const n = await ask('New habit'); if (n?.trim()) { H.push({ id: uid(), name: n.trim(), days: {} }); save(); viewHome(); } };
+        box.onchange = e => { const h = H.find(x => x.id === e.target.dataset.h); if (!h) return; if (e.target.checked) h.days[e.target.dataset.d] = true; else delete h.days[e.target.dataset.d]; save(); viewHome(); };
+        box.onclick = e => { const id = e.target.dataset.rm; if (id && confirm('Remove this habit?')) { S.habits = H.filter(x => x.id !== id); save(); viewHome(); } };
+      }
+    };
+  } },
+  formulas: { name: 'Formula sheet', col: 1, make: () => ({
+    title: 'Formula sheet', tools: '<button data-add>＋ Formula</button><label class="btn" title="Add a picture or a photo of a formula sheet">＋ Picture<input type="file" accept="image/*" multiple hidden data-pic></label>',
+    body: `<section class="box fs">${(S.formulas ||= []).map((f, i) => typeof f === 'object' ? `<div class="frm fimg" data-i="${i}" title="Click to view"><img src="${esc(f.img)}" alt=""><span>${esc(f.name || '')}</span><button class="x" data-rm="${i}" title="Remove">✕</button></div>`
+      : `<div class="frm" data-i="${i}" title="Click to copy as $LaTeX$"><span class="math" data-tex="${esc(f)}"></span><button class="x" data-rm="${i}" title="Remove">✕</button></div>`).join('') || '<p class="mut" style="margin:0">Pin equations you use often (click one to copy it), or add pictures of formula sheets.</p>'}</section>`,
+    bind: w => {
+      w.querySelectorAll('.math').forEach(renderOne);
+      w.querySelector('[data-add]').onclick = async () => { const t = await ask('Formula (LaTeX)', '', true); if (t?.trim()) { S.formulas.push(t.trim()); save(); viewHome(); } };
+      w.querySelector('[data-pic]').onchange = async e => { for (const file of e.target.files) { const img = await shrinkImage(file, 1600); if (img) S.formulas.push({ img, name: file.name.replace(/\.[^.]+$/, '') }); } save(); viewHome(); };
+      w.querySelector('.fs').onclick = e => {
+        const rm = e.target.closest('[data-rm]'); if (rm) { S.formulas.splice(+rm.dataset.rm, 1); save(); viewHome(); return; }
+        const f = e.target.closest('.frm'); if (!f) return; const item = S.formulas[f.dataset.i];
+        if (typeof item === 'object') return dialog(`<h3>${esc(item.name || 'Picture')}</h3><img src="${esc(item.img)}" style="max-width:100%;max-height:70vh;border-radius:8px">`);
+        navigator.clipboard.writeText(`$${item}$`); f.classList.add('copied'); setTimeout(() => f.classList.remove('copied'), 900);
+      };
+    }
+  }) },
+  inkpad: { name: 'Quick ink pad', col: 1, make: () => ({
+    title: 'Ink pad', tools: '<button data-wb title="Turn this sketch into a whiteboard">Save to whiteboard</button>',
+    body: `<section class="box" style="padding:0;overflow:hidden"><div class="tb" style="padding:6px 8px">${inkBar()}</div><div class="inkpad"><canvas class="ink"></canvas></div></section>`,
+    bind: w => {
+      const host = w.querySelector('.inkpad');
+      const ink = attachInk(inkGroup(w.querySelector('.inkbar')), { host, canvas: host.querySelector('canvas'), list: () => S.inkpad ||= [], save, always: true, size: () => [host.clientWidth, host.clientHeight] });
+      new ResizeObserver(() => ink.fit()).observe(host);
+      w.querySelector('[data-wb]').onclick = () => {
+        if (!S.inkpad?.length) return;
+        const b = { id: uid(), name: 'Ink pad ' + new Date().toLocaleDateString(LOC), bg: 'dots', dark: false, updated: Date.now(),
+          items: S.inkpad.map(s => ({ k: 'ink', ...s, c: s.c === '#e8e8e8' ? '#111111' : s.c })) };
+        S.boards.push(b); S.inkpad = []; save(); location.hash = '#/board/' + b.id;
+      };
+    }
+  }) },
+  brief: { name: 'AI daily brief', col: 1, make: () => {
+    const b = S.brief, fresh = b?.date === today();
+    if (!NATIVE) return { title: 'Daily brief', body: `<section class="box">${DESKTOP_ONLY('The AI daily brief (DeepSeek)')}</section>` };
+    return {
+      title: 'Daily brief', tools: `<button data-gen>${fresh ? 'Refresh' : 'Generate'}</button>`,
+      body: `<section class="box"><div class="brief">${fresh ? esc(b.text) : `<p class="mut" style="margin:0">${S.settings.aiKey ? 'Click Generate for a short plan of your day from your tasks and calendar.' : 'Add a DeepSeek key in <a href="#/settings">Settings</a> to get an AI plan for your day.'}</p>`}</div></section>`,
+      bind: w => w.querySelector('[data-gen]').onclick = async e => {
+        if (!S.settings.aiKey) return location.hash = '#/settings';
+        e.target.textContent = 'Thinking…';
+        const T = today(), lines = [...S.tasks.filter(t => !t.done).map(t => `Task: ${t.title}${t.due ? ` (due ${t.due})` : ''}`),
+          ...[0, 1, 2].flatMap(i => { const d = new Date(); d.setDate(d.getDate() + i); const ds = ymd(d); return [...S.events.filter(x => x.date === ds), ...icsOn(ds)].map(x => `Event ${ds} ${x.time || 'all day'}: ${x.title}`); })];
+        try {
+          const text = await window.native.ai({ key: S.settings.aiKey, model: S.settings.aiModel, messages: [
+            { role: 'system', content: 'Write a short, friendly daily brief (max 120 words): top priorities first, then the schedule, then one practical tip. Plain text with short "- " bullet lines.' },
+            { role: 'user', content: `Today is ${T}.\n${lines.join('\n') || 'Nothing scheduled.'}` }] });
+          S.brief = { date: T, text }; save(); viewHome();
+        } catch (err) { w.querySelector('.brief').textContent = 'Error: ' + errText(err); e.target.textContent = 'Retry'; }
+      }
+    };
+  } }
+};
+const HOME_DEFAULT = () => [Object.keys(WIDGETS).filter(id => WIDGETS[id].col === 0), Object.keys(WIDGETS).filter(id => WIDGETS[id].col === 1)];
+function homeLayout() {
+  const L = S.settings.home ||= { cols: HOME_DEFAULT() };
+  L.collapsed ||= {}; L.hidden ||= {}; L.size ||= {};
+  for (const id in WIDGETS) if (!L.cols.flat().includes(id)) L.cols[WIDGETS[id].col].push(id);
+  return L;
+}
+
+function viewHome() {
+  const h = new Date().getHours(), L = homeLayout(), made = {};
+  main.innerHTML = `<div class="home"><div class="row" style="align-items:flex-start"><div style="flex:1"><h1>${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}</h1><p class="mut" style="margin:0">${new Date().toLocaleDateString(LOC, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div>${window.native?.openWidget ? `<button class="btn" id="miniWin" title="A small always-on-top window with your tasks, today and the scratch pad">${icon('fit', 16)} Mini window</button>` : ''}<a class="btn" href="#/settings/widgets">${icon('settings', 16)} Customize</a></div>
+    <div class="hcols">${L.cols.map((col, ci) => `<div class="hcol" data-col="${ci}">${col.filter(id => WIDGETS[id] && !L.hidden[id]).map(id => {
+      const m = made[id] = WIDGETS[id].make();
+      return `<div class="widget sz-${L.size[id] || 'fit'}${L.collapsed[id] ? ' shut' : ''}" data-w="${id}"><div class="wh"><span class="grip" draggable="true" title="Drag to move">⠿</span><button class="fold" title="Collapse / expand">${icon('down', 16)}</button><h3>${m.title}</h3>${m.tools || ''}</div><div class="wb">${m.body}</div></div>`;
+    }).join('')}</div>`).join('')}</div></div>`;
+  if ($('#miniWin')) $('#miniWin').onclick = () => window.native.openWidget();
+  for (const id in made) made[id].bind?.(main.querySelector(`[data-w="${id}"]`));
+  // drag a widget by its grip; it snaps into the slot under the cursor in either column
+  let dragId = null; const ph = document.createElement('div'); ph.className = 'wph';
+  main.querySelectorAll('.grip').forEach(g => g.ondragstart = e => {
+    const w = g.closest('.widget'); dragId = w.dataset.w;
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.setDragImage(w, 24, 18);
+    ph.style.height = Math.min(w.offsetHeight, 220) + 'px'; setTimeout(() => w.classList.add('dragging'));
+  });
+  main.ondragend = () => { dragId = null; ph.remove(); main.querySelectorAll('.dragging').forEach(w => w.classList.remove('dragging')); };
+  main.querySelectorAll('.hcol').forEach(col => {
+    col.ondragover = e => {
+      if (!dragId) return; e.preventDefault();
+      const next = [...col.querySelectorAll('.widget:not(.dragging)')].find(w => e.clientY < w.getBoundingClientRect().top + w.offsetHeight / 2);
+      if (next) { if (ph.nextSibling !== next) col.insertBefore(ph, next); } else if (col.lastChild !== ph) col.append(ph);
+    };
+    col.ondrop = e => {
+      e.preventDefault(); if (!dragId) return;
+      const at = [...col.children].filter(c => c === ph || (c.dataset.w && c.dataset.w !== dragId)).indexOf(ph);
+      L.cols.forEach(c => { const i = c.indexOf(dragId); if (i >= 0) c.splice(i, 1); });
+      L.cols[+col.dataset.col].splice(at, 0, dragId); dragId = null; save(); viewHome();
+    };
+  });
+  main.querySelectorAll('.fold').forEach(b => b.onclick = () => { const w = b.closest('.widget'), id = w.dataset.w; L.collapsed[id] = !L.collapsed[id]; w.classList.toggle('shut', L.collapsed[id]); save(); });
+}
+
+/* ---------- files (PDF + Markdown) ---------- */
+const fileTags = () => [...new Set(S.files.flatMap(f => f.tags))].sort();
+const safeHTML = html => DOMPurify.sanitize(html, { USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'form'] }); // HTML from markdown files and imported backups
+const safeImg = s => /^data:image\//.test(s) ? s : ''; // pictures are stored as data URLs
+// a backup is a file from anywhere: clean what the page later inserts as raw HTML
+function cleanBackup(data) {
+  const inTrash = data.trash || [];
+  for (const n of [...data.notes, ...inTrash.flatMap(t => t.notes || [])]) if (n.html) n.html = safeHTML(n.html);
+  for (const t of data.templates || []) t.html = safeHTML(t.html);
+  for (const b of [...data.boards || [], ...inTrash.flatMap(t => t.board ? [t.board] : [])]) { if (b.thumb) b.thumb = safeImg(b.thumb); if (b.items) b.items = b.items.filter(i => i.k !== 'img' || safeImg(i.src)); }
+  return data;
+}
+async function addFiles(list) {
+  for (const file of list) {
+    const type = /\.(md|markdown)$/i.test(file.name) ? 'md' : /\.pdf$/i.test(file.name) ? 'pdf' : /\.pptx$/i.test(file.name) ? 'pptx' : null;
+    if (!type) { alert(/\.ppt$/i.test(file.name) ? `"${file.name}" is the old PowerPoint 97–2003 format. Open it in PowerPoint and use File → Save As → .pptx, then add that file.` : `Skipped "${file.name}" — only PDF, Markdown (.md) and PowerPoint (.pptx) files are supported.`); continue; }
+    const f = { id: uid(), name: file.name, type, size: file.size, added: Date.now(), tags: [] };
+    try {
+      if (type === 'md') f.text = await file.text();
+      else { if (type === 'pptx') f.text = pptxText(await loadPptx(file)); await idbPut('files', f.id, file); }
+    } catch (e) { alert(`Could not read "${file.name}": ${e.message}`); continue; }
+    S.files.push(f);
+  }
+  save(); route();
+}
+
+/* ---------- pptx: parse, render, edit text in place, write back ---------- */
+const NS = { a: 'http://schemas.openxmlformats.org/drawingml/2006/main', p: 'http://schemas.openxmlformats.org/presentationml/2006/main', r: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships' };
+const parseXml = s => { const d = new DOMParser().parseFromString(s, 'application/xml'); if (d.getElementsByTagName('parsererror').length) throw new Error('damaged XML inside the file'); return d; };
+const kids = (el, ns, n) => el ? [...el.children].filter(c => c.namespaceURI === NS[ns] && c.localName === n) : [];
+const kid = (el, ns, n) => kids(el, ns, n)[0];
+const desc = (el, ns, n) => el ? [...el.getElementsByTagNameNS(NS[ns], n)] : [];
+const resolve = (base, target) => { if (target.startsWith('/')) return target.slice(1); const p = base.split('/').slice(0, -1); for (const s of target.split('/')) s === '..' ? p.pop() : s !== '.' && p.push(s); return p.join('/'); };
+async function relsOf(zip, part) {
+  const f = zip.file(part.replace(/([^/]+)$/, '_rels/$1.rels')), out = {}; if (!f) return out;
+  for (const r of parseXml(await f.async('text')).getElementsByTagName('Relationship'))
+    out[r.getAttribute('Id')] = { target: r.getAttribute('TargetMode') === 'External' ? r.getAttribute('Target') : resolve(part, r.getAttribute('Target')), type: r.getAttribute('Type'), external: r.getAttribute('TargetMode') === 'External' };
+  return out;
+}
+async function loadPptx(blob) {
+  const zip = await JSZip.loadAsync(blob), pres = parseXml(await zip.file('ppt/presentation.xml').async('text')), prels = await relsOf(zip, 'ppt/presentation.xml');
+  const sz = desc(pres, 'p', 'sldSz')[0], cache = {};
+  const part = async p => p && (cache[p] ||= parseXml(await zip.file(p).async('text')));
+  const slides = [];
+  for (const id of desc(pres, 'p', 'sldId')) {
+    const path = prels[id.getAttributeNS(NS.r, 'id')]?.target; if (!path || !zip.file(path)) continue;
+    const rels = await relsOf(zip, path), lp = Object.values(rels).find(x => x.type.endsWith('/slideLayout'))?.target;
+    const mp = lp && Object.values(await relsOf(zip, lp)).find(x => x.type.endsWith('/slideMaster'))?.target;
+    slides.push({ path, sldId: id, doc: parseXml(await zip.file(path).async('text')), rels, layout: await part(lp), master: await part(mp), dirty: false });
+  }
+  return { zip, pres, prelsDoc: parseXml(await zip.file('ppt/_rels/presentation.xml.rels').async('text')), cx: +sz.getAttribute('cx'), cy: +sz.getAttribute('cy'), slides };
+}
+const ser = d => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + new XMLSerializer().serializeToString(d).replace(/^<\?xml[^>]*\?>\s*/, '');
+const relsPathOf = p => p.replace(/([^/]+)$/, '_rels/$1.rels');
+async function editContentTypes(zip, fn) { const ct = parseXml(await zip.file('[Content_Types].xml').async('text')); fn(ct); zip.file('[Content_Types].xml', ser(ct)); }
+// new slide after slide i: a copy (dup) or a blank one with the same layout's title/body placeholders
+async function addSlide(deck, i, dup) {
+  const { zip } = deck, src = deck.slides[i]; let n = 1; while (zip.file(`ppt/slides/slide${n}.xml`)) n++;
+  const path = `ppt/slides/slide${n}.xml`, rels = parseXml(await zip.file(relsPathOf(src.path)).async('text'));
+  [...rels.getElementsByTagName('Relationship')].forEach(r => { const t = r.getAttribute('Type'); if (/notesSlide|comments/.test(t) || (!dup && !t.endsWith('/slideLayout'))) r.remove(); });
+  const doc = parseXml(new XMLSerializer().serializeToString(src.doc));
+  if (!dup) {
+    const tree = desc(doc, 'p', 'spTree')[0]; let id = 2;
+    [...tree.children].filter(c => !['nvGrpSpPr', 'grpSpPr'].includes(c.localName)).forEach(c => c.remove());
+    for (const sp of desc(src.layout, 'p', 'sp')) {
+      const ph = phOf(sp); if (!ph || ['dt', 'ftr', 'sldNum'].includes(ph.getAttribute('type'))) continue;
+      const attrs = [...ph.attributes].map(a => `${a.name}="${esc(a.value)}"`).join(' ');
+      tree.append(doc.importNode(parseXml(`<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${id}" name="Placeholder ${id++}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph ${attrs}/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp>`).documentElement, true));
+    }
+    if (id === 2) { // layout has no title/body placeholders: start with a title and a body box
+      addTextBox(deck, { doc }, { x: .06, y: .06, w: .88, h: .14, sz: 3600, b: 1 });
+      addTextBox(deck, { doc }, { x: .06, y: .26, w: .88, h: .62, sz: 2000 });
+    }
+  }
+  zip.file(path, ser(doc)); zip.file(relsPathOf(path), ser(rels));
+  await editContentTypes(zip, ct => { const o = ct.createElementNS(ct.documentElement.namespaceURI, 'Override'); o.setAttribute('PartName', '/' + path); o.setAttribute('ContentType', 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml'); ct.documentElement.append(o); });
+  const pr = deck.prelsDoc, rid = 'rId' + (Math.max(0, ...[...pr.getElementsByTagName('Relationship')].map(r => +r.getAttribute('Id').replace(/\D/g, '') || 0)) + 1);
+  const rel = pr.createElementNS(pr.documentElement.namespaceURI, 'Relationship');
+  rel.setAttribute('Id', rid); rel.setAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide'); rel.setAttribute('Target', `slides/slide${n}.xml`); pr.documentElement.append(rel);
+  const sid = deck.pres.createElementNS(NS.p, 'p:sldId');
+  sid.setAttribute('id', Math.max(255, ...desc(deck.pres, 'p', 'sldId').map(s => +s.getAttribute('id'))) + 1); sid.setAttributeNS(NS.r, 'r:id', rid); src.sldId.after(sid);
+  zip.file('ppt/presentation.xml', ser(deck.pres)); zip.file('ppt/_rels/presentation.xml.rels', ser(pr));
+}
+async function deleteSlide(deck, i) {
+  const s = deck.slides[i], rid = s.sldId.getAttributeNS(NS.r, 'id'), gone = [s.path];
+  Object.values(s.rels).forEach(r => { if (r.type.endsWith('/notesSlide')) gone.push(r.target); }); // its speaker-notes page goes too
+  s.sldId.remove();
+  [...deck.prelsDoc.getElementsByTagName('Relationship')].find(r => r.getAttribute('Id') === rid)?.remove();
+  gone.forEach(p => { deck.zip.remove(p); deck.zip.remove(relsPathOf(p)); });
+  await editContentTypes(deck.zip, ct => [...ct.getElementsByTagName('Override')].filter(o => gone.includes(o.getAttribute('PartName').slice(1))).forEach(o => o.remove()));
+  deck.zip.file('ppt/presentation.xml', ser(deck.pres)); deck.zip.file('ppt/_rels/presentation.xml.rels', ser(deck.prelsDoc));
+  deck.slides.splice(i, 1);
+}
+
+/* ---------- sticky notes (kept in the app, per slide) ---------- */
+const STICKY_COLORS = ['#ffe066', '#ffadad', '#b5ead7', '#a0c4ff', '#d7b4ff'];
+function renderStickies(layer, list, k, save) { // k = CSS px per stored unit
+  layer.innerHTML = '';
+  list.forEach(st => {
+    const el = document.createElement('div');
+    el.className = 'sticky' + (st.open ? ' open' : '') + (st.x * k > layer.clientWidth - 300 ? ' left' : '');
+    el.dataset.noink = ''; el.style.left = st.x * k + 'px'; el.style.top = st.y * k + 'px'; el.style.setProperty('--sc', st.color);
+    const mark = () => st.text || st.ink?.length ? '≡' : '';
+    el.innerHTML = `<button class="stk-ic" title="${esc(st.text.slice(0, 120)) || 'Sticky note'} — click to open, drag to move">${mark()}</button><div class="stk-card"><div class="stk-h">${STICKY_COLORS.map(c => `<button class="stk-c" data-c="${c}" style="background:${c}"></button>`).join('')}<span style="flex:1"></span>${hwOn() ? '<button data-totext title="Turn the handwriting into typed text">Aa</button>' : ''}<button data-clrink title="Clear handwriting">${icon('clear', 14)}</button><button data-del title="Delete note">${icon('trash', 14)}</button><button data-min title="Collapse">—</button></div><textarea placeholder="Type a note…">${esc(st.text)}</textarea><div class="stk-ink" title="Write or draw here with your pen (or mouse)"><canvas class="ink"></canvas></div><small>${new Date(st.at).toLocaleString(LOC)}</small></div>`;
+    const ic = el.querySelector('.stk-ic'), ta = el.querySelector('textarea'), inkHost = el.querySelector('.stk-ink');
+    // handwriting area inside the card: any input draws, dark ink, its own undo stack
+    const ink = attachInk({ undo: [], surfaces: [], sync() { } }, { host: inkHost, canvas: inkHost.querySelector('canvas'), list: () => st.ink ||= [], save: () => { ic.textContent = mark(); save(); }, always: true, pen: { c: '#2b2400', w: 2 }, size: () => [226, 120] });
+    ic.onpointerdown = e => { // drag to move, click to open/close
+      e.preventDefault(); ic.setPointerCapture(e.pointerId);
+      const r = layer.getBoundingClientRect(), sx = e.clientX, sy = e.clientY, ox = st.x, oy = st.y; let moved = false;
+      ic.onpointermove = m => { if (Math.abs(m.clientX - sx) + Math.abs(m.clientY - sy) > 4) moved = true; if (!moved) return;
+        st.x = Math.max(0, Math.min((r.width - 28) / k, ox + (m.clientX - sx) / k)); st.y = Math.max(0, Math.min((r.height - 28) / k, oy + (m.clientY - sy) / k));
+        el.style.left = st.x * k + 'px'; el.style.top = st.y * k + 'px'; };
+      ic.onpointerup = () => { ic.onpointermove = ic.onpointerup = null; if (!moved) { st.open = !st.open; } save(); renderStickies(layer, list, k, save); if (st.open) layer.querySelector(`.sticky:nth-child(${list.indexOf(st) + 1}) textarea`)?.focus(); };
+    };
+    ta.oninput = () => { st.text = ta.value; ic.textContent = mark(); save(); };
+    el.querySelector('.stk-h').onclick = e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.c) { st.color = b.dataset.c; el.style.setProperty('--sc', st.color); save(); }
+      if ('clrink' in b.dataset && st.ink?.length) ink.apply([...st.ink], []);
+      if ('totext' in b.dataset) recognizeInk(st.ink || []).then(t => { if (t == null) return; st.text = (st.text ? st.text + '\n' : '') + t; ta.value = st.text; ink.apply([...st.ink], []); ic.textContent = mark(); save(); });
+      if ('min' in b.dataset) { st.open = false; el.classList.remove('open'); save(); }
+      if ('del' in b.dataset && (!(st.text || st.ink?.length) || confirm('Delete this sticky note?'))) { list.splice(list.indexOf(st), 1); save(); renderStickies(layer, list, k, save); }
+    };
+    layer.append(el);
+  });
+}
+const pptxText = deck => deck.slides.map((s, i) => `[Slide ${i + 1}] ` + desc(s.doc, 'a', 'p').map(p => desc(p, 'a', 't').map(t => t.textContent).join('')).filter(Boolean).join(' / ')).join('\n');
+function xfrmOf(el) {
+  const x = kid(kid(el, 'p', 'spPr') || kid(el, 'p', 'grpSpPr'), 'a', 'xfrm') || kid(el, 'p', 'xfrm');
+  const off = kid(x, 'a', 'off'), ext = kid(x, 'a', 'ext');
+  return off && ext ? { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy'), chOff: kid(x, 'a', 'chOff'), chExt: kid(x, 'a', 'chExt') } : null;
+}
+const phOf = el => desc(el.firstElementChild, 'p', 'ph')[0];
+function inherited(slide, ph) { // placeholders without their own position take it from the layout, then the master
+  if (!ph) return null;
+  const type = ph.getAttribute('type') || 'body', idx = ph.getAttribute('idx'), alias = { ctrTitle: 'title', subTitle: 'body' };
+  for (const d of [slide.layout, slide.master]) {
+    const sps = desc(d, 'p', 'sp').filter(phOf);
+    const m = sps.find(sp => idx != null && phOf(sp).getAttribute('idx') === idx) || sps.find(sp => [type, alias[type]].includes(phOf(sp).getAttribute('type') || 'body'));
+    const x = m && xfrmOf(m); if (x) return x;
+  }
+  return null;
+}
+function setParaText(p, text) { // ponytail: edited paragraph keeps its first run's formatting; mixed formatting inside it is flattened
+  const doc = p.ownerDocument, runs = kids(p, 'a', 'r');
+  [...kids(p, 'a', 'br'), ...kids(p, 'a', 'fld'), ...runs.slice(1)].forEach(n => n.remove());
+  let r = runs[0];
+  if (!r) {
+    r = doc.createElementNS(NS.a, 'a:r'); const rPr = doc.createElementNS(NS.a, 'a:rPr'), end = kid(p, 'a', 'endParaRPr');
+    rPr.setAttribute('lang', 'en-US'); if (end) for (const at of end.attributes) rPr.setAttribute(at.name, at.value);
+    r.append(rPr, doc.createElementNS(NS.a, 'a:t')); p.insertBefore(r, end || null);
+  }
+  (kid(r, 'a', 't') || r.appendChild(doc.createElementNS(NS.a, 'a:t'))).textContent = text.replace(/\n+/g, ' ');
+}
+function renderSlide(deck, s, el, W, onEdit) {
+  const k = W / deck.cx, ptpx = W / (deck.cx / 12700);
+  el.innerHTML = ''; el.style.width = W + 'px'; el.style.height = W * deck.cy / deck.cx + 'px';
+  const bgc = desc(desc(s.doc, 'p', 'bg')[0], 'a', 'srgbClr')[0]?.getAttribute('val'); el.style.background = bgc ? '#' + bgc : '#fff';
+  const para = (p, box, phType) => {
+    const d = document.createElement('div'); d.className = 'pp'; d.contentEditable = 'true';
+    const rPr = kid(kids(p, 'a', 'r')[0], 'a', 'rPr') || kid(p, 'a', 'endParaRPr');
+    const pt = +(rPr?.getAttribute('sz') || 0) / 100 || (/title/i.test(phType || '') ? 40 : phType === 'subTitle' ? 24 : 20);
+    Object.assign(d.style, { fontSize: pt * ptpx + 'px', fontWeight: rPr?.getAttribute('b') === '1' || /title/i.test(phType || '') ? 700 : '', fontStyle: rPr?.getAttribute('i') === '1' ? 'italic' : '', textAlign: { ctr: 'center', r: 'right', just: 'justify' }[kid(p, 'a', 'pPr')?.getAttribute('algn')] || '' });
+    const col = desc(rPr, 'a', 'srgbClr')[0]?.getAttribute('val'); if (col) d.style.color = '#' + col;
+    d.textContent = [...p.children].map(n => n.localName === 'br' ? '\n' : ['r', 'fld'].includes(n.localName) ? desc(n, 'a', 't').map(t => t.textContent).join('') : '').join('');
+    d.oninput = () => { setParaText(p, d.innerText); s.dirty = true; onEdit(); };
+    d.onkeydown = e => { // Enter splits into a new paragraph
+      if (e.key !== 'Enter') return; e.preventDefault();
+      const r = getSelection().getRangeAt(0), pre = document.createRange(); pre.selectNodeContents(d); pre.setEnd(r.startContainer, r.startOffset);
+      const before = pre.toString(), after = d.textContent.slice(before.length), np = p.cloneNode(true);
+      setParaText(p, before); setParaText(np, after); p.after(np); d.textContent = before;
+      const nd = para(np, box, phType); d.after(nd); nd.focus(); s.dirty = true; onEdit();
+    };
+    return d;
+  };
+  const walk = (parent, map) => {
+    for (const node of parent.children) {
+      const ln = node.localName;
+      if (ln === 'grpSp') {
+        const g = xfrmOf(node); let m = map;
+        if (g?.chOff && g.chExt) { const ox = +g.chOff.getAttribute('x'), oy = +g.chOff.getAttribute('y'), sx = g.w / (+g.chExt.getAttribute('cx') || 1), sy = g.h / (+g.chExt.getAttribute('cy') || 1); m = r => map({ x: g.x + (r.x - ox) * sx, y: g.y + (r.y - oy) * sy, w: r.w * sx, h: r.h * sy }); }
+        walk(node, m); continue;
+      }
+      if (!['sp', 'pic', 'graphicFrame', 'cxnSp'].includes(ln)) continue;
+      let r = xfrmOf(node) || inherited(s, phOf(node)); if (!r) continue; r = map(r);
+      const box = document.createElement('div'); box.className = 'shp'; box._node = node;
+      Object.assign(box.style, { left: r.x * k + 'px', top: r.y * k + 'px', width: r.w * k + 'px', height: r.h * k + 'px' });
+      const fc = kid(kid(kid(node, 'p', 'spPr'), 'a', 'solidFill'), 'a', 'srgbClr')?.getAttribute('val'); if (fc && ln !== 'pic') box.style.background = '#' + fc;
+      if (ln === 'pic') {
+        const t = s.rels[desc(node, 'a', 'blip')[0]?.getAttributeNS(NS.r, 'embed')], f = t && !t.external && deck.zip.file(t.target);
+        if (f) { const img = document.createElement('img'); f.async('blob').then(b => img.src = URL.createObjectURL(b)); box.append(img); }
+      }
+      const bodies = ln === 'graphicFrame' ? desc(node, 'a', 'txBody') : kids(node, 'p', 'txBody'); // tables are shown as their cell text
+      const anchor = kid(bodies[0], 'a', 'bodyPr')?.getAttribute('anchor'), phType = phOf(node)?.getAttribute('type');
+      if (anchor === 'ctr' || anchor === 'b' || /title/i.test(phType || '')) Object.assign(box.style, { display: 'flex', flexDirection: 'column', justifyContent: anchor === 'b' ? 'flex-end' : 'center' });
+      for (const tx of bodies) for (const p of kids(tx, 'a', 'p')) box.append(para(p, box, phType));
+      el.append(box);
+    }
+  };
+  walk(desc(s.doc, 'p', 'spTree')[0], r => r);
+}
+function addTextBox(deck, s, o = { x: .25, y: .44, w: .5, h: .12, sz: 2400, text: 'New text' }) { // o: position/size as fractions of the slide
+  const tree = desc(s.doc, 'p', 'spTree')[0], id = Math.max(1, ...desc(s.doc, 'p', 'cNvPr').map(n => +n.getAttribute('id') || 0)) + 1;
+  const [x, w] = [o.x, o.w].map(v => Math.round(v * deck.cx)), [y, h] = [o.y, o.h].map(v => Math.round(v * deck.cy));
+  const run = o.text ? `<a:r><a:rPr lang="en-US" sz="${o.sz}"${o.b ? ' b="1"' : ''} dirty="0"/><a:t>${esc(o.text)}</a:t></a:r>` : `<a:endParaRPr lang="en-US" sz="${o.sz}"${o.b ? ' b="1"' : ''} dirty="0"/>`;
+  const frag = parseXml(`<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${id}" name="TextBox ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0"/><a:lstStyle/><a:p>${run}</a:p></p:txBody></p:sp>`).documentElement;
+  tree.append(s.doc.importNode(frag, true)); s.dirty = true;
+}
+async function savePptx(f, deck) {
+  for (const s of deck.slides) if (s.dirty) { deck.zip.file(s.path, ser(s.doc)); s.dirty = false; }
+  const blob = await deck.zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+  await idbPut('files', f.id, blob); f.blobAt = Date.now(); f.size = blob.size; f.text = pptxText(deck); save();
+  return blob;
+}
+let fileQ = '', fileTag = '';
+const pptxAct = {}, pptxScroll = {}; // selected slide + scroll per presentation, kept across re-renders
+function viewFiles(id) {
+  main.innerHTML = `<div class="split" data-pane="${id ? 'view' : 'list'}"><div class="list" data-rz="flist:220:600"><header>
+      <div class="row"><h2>${icon('files')}Files</h2><label class="btn pri">${icon('upload', 16)} Add<input type="file" id="fin" accept=".pdf,.md,.markdown,.pptx" multiple hidden></label></div>
+      <input id="fq" placeholder="Search names, tags, Markdown and slide text…" value="${esc(fileQ)}"><div class="tags" id="ftags"></div></header><div class="items" id="fitems"></div></div><div class="fview" id="fv"></div></div>`;
+  const sel = S.files.find(f => f.id === id);
+  addResizers(main);
+  const items = () => {
+    const q = fileQ.toLowerCase();
+    $('#ftags').innerHTML = fileTags().map(t => `<button class="tag${t === fileTag ? ' on' : ''}" data-tag="${esc(t)}">#${esc(t)}</button>`).join('');
+    const hits = [...S.files].sort((a, b) => b.added - a.added).filter(f => (!fileTag || f.tags.includes(fileTag)) && (!q || (f.name + ' ' + f.tags.join(' ')).toLowerCase().includes(q) || f.text?.toLowerCase().includes(q)));
+    $('#fitems').innerHTML = hits.map(f => {
+      let snip = '';
+      if (q && f.text) { const i = f.text.toLowerCase().indexOf(q); if (i >= 0) snip = esc(f.text.slice(Math.max(0, i - 50), i)) + '<mark>' + esc(f.text.slice(i, i + q.length)) + '</mark>' + esc(f.text.slice(i + q.length, i + q.length + 80)); }
+      return `<div class="item${f === sel ? ' on' : ''}" data-id="${f.id}"><b><span class="ftype ${f.type}">${f.type.toUpperCase()}</span> ${esc(f.name)}</b>${snip ? `<p>…${snip}…</p>` : ''}<div class="tags">${f.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div><small>${kb(f.size)} · ${ago(f.added)}</small></div>`;
+    }).join('') || `<p class="mut" style="padding:14px">${S.files.length ? 'No matches.' : 'Drop PDF or Markdown files here, or click Add.'}</p>`;
+  };
+  $('#fq').oninput = e => { fileQ = e.target.value; items(); };
+  $('#ftags').onclick = e => { const t = e.target.closest('[data-tag]'); if (t) { fileTag = fileTag === t.dataset.tag ? '' : t.dataset.tag; items(); } };
+  $('#fitems').onclick = e => { const it = e.target.closest('.item'); if (it) location.hash = `#/files/${it.dataset.id}`; };
+  $('#fin').onchange = e => addFiles(e.target.files);
+  const sp = main.querySelector('.split');
+  sp.ondragover = e => { e.preventDefault(); sp.classList.add('drop'); };
+  sp.ondragleave = e => { if (!sp.contains(e.relatedTarget)) sp.classList.remove('drop'); };
+  sp.ondrop = e => { e.preventDefault(); sp.classList.remove('drop'); addFiles(e.dataTransfer.files); };
+  items();
+  const fv = $('#fv');
+  if (!sel) { fv.innerHTML = `<div class="empty">${icon('files', 40)}<div>Select a file, or drop PDF, .md or .pptx files anywhere here.</div></div>`; return; }
+  fv.innerHTML = `<div class="etop" style="padding:12px 20px"><b style="color:var(--tx);font-size:15px">${esc(sel.name)}</b><span style="flex:1"></span><input id="ftagin" placeholder="tags, comma separated" value="${esc(sel.tags.join(', '))}" style="width:240px"><button id="fdl">Export</button><button id="fdel">${icon('trash', 16)} Delete</button></div><div id="fbody" style="flex:1;display:flex;min-height:0"></div>`;
+  fv.insertAdjacentHTML('afterbegin', backLink('#/files', 'Files'));
+  $('#ftagin').onchange = e => { sel.tags = [...new Set(e.target.value.split(',').map(t => t.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))]; save(); items(); };
+  $('#fdel').onclick = () => { if (confirm(`Move "${sel.name}" to the trash?`)) { trashFile(sel); location.hash = '#/files'; } };
+  if (sel.type === 'md') {
+    currentFileText = `File: ${sel.name}\n\n${sel.text}`;
+    $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="mdTts" title="Read aloud">${icon('speaker', 15)} Read</button>${inkBar()}</div><div class="md" id="mdv"></div></div>`;
+    const mdv = $('#mdv'); mdv.innerHTML = safeHTML(marked.parse(sel.text)); mathify(mdv);
+    mdv.onclick = e => { const a = e.target.closest('a[href]'); if (!a) return; e.preventDefault(); if (/^https?:/.test(a.getAttribute('href'))) openLink(a.href); }; // a link must not replace the app
+    $('#mdTts').onclick = e => speak(speakable(mdv), e.currentTarget);
+    const cv = document.createElement('canvas'); cv.className = 'ink'; mdv.append(cv);
+    attachInk(inkGroup($('#fbody .inkbar')), { host: mdv, canvas: cv, list: () => sel.ink ||= [], save });
+    $('#fdl').onclick = () => dl(new Blob([sel.text], { type: 'text/markdown' }), sel.name);
+  } else if (sel.type === 'pptx') idbGet('files', sel.id).then(async blob => {
+    let deck; try { deck = await loadPptx(blob); } catch (e) { $('#fbody').innerHTML = `<div class="empty">Could not open this presentation: ${esc(e.message)}</div>`; return; }
+    currentFileText = `Presentation: ${sel.name}\n\n${pptxText(deck)}`;
+    $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb">
+      <button id="pnew" title="Add a blank slide after the selected one">＋ Slide</button><button id="pdup" title="Duplicate the selected slide">Duplicate</button><button id="prm" title="Delete the selected slide">Delete slide</button><span class="vs"></span>
+      <button id="ptb" title="Add a text box to the selected slide">＋ Text box</button><button id="pdel" title="Delete the selected box">Delete box</button><span class="vs"></span>
+      <button id="pstk" title="Add a sticky note to the selected slide" >${icon('sticky', 16)} Sticky</button>${NATIVE ? '<button id="popen" title="Open a copy in PowerPoint (changes made there are not synced back)">Open in PowerPoint</button>' : ''}<small id="pst" style="align-self:center;margin-left:6px">Saved</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
+    const deckEl = $('#deck'), g = inkGroup($('#fbody .inkbar')), W = deckWidth(deckEl), H = W * deck.cy / deck.cx, k = W / 1000;
+    let saveT2, act = Math.min(pptxAct[sel.id] || 0, deck.slides.length - 1), actBox = null;
+    const edited = () => { $('#pst').textContent = 'Saving…'; clearTimeout(saveT2); saveT2 = setTimeout(async () => { await savePptx(sel, deck); $('#pst').textContent = 'Saved'; }, 800); };
+    // ink + sticky notes live in the app, keyed by slide part so they follow the slide when others are added or removed
+    sel.ink = Array.isArray(sel.ink) || !sel.ink ? {} : sel.ink; sel.stickies ||= {};
+    const select = i => { act = pptxAct[sel.id] = i; deckEl.querySelectorAll('.slidewrap').forEach((w, j) => w.classList.toggle('act', j === i)); };
+    deck.slides.forEach((s, i) => {
+      const wrap = document.createElement('div'); wrap.className = 'slidewrap'; wrap.style.width = W + 'px';
+      wrap.innerHTML = `<span class="num">${i + 1}</span><div class="slide"></div><canvas class="ink"></canvas><div class="stk-layer"></div>`;
+      deckEl.append(wrap);
+      const slideEl = wrap.querySelector('.slide'); renderSlide(deck, s, slideEl, W, edited);
+      const pick = e => { select(i); const b = e.target.closest?.('.shp'); if (b) { actBox?.classList.remove('act'); actBox = b; b.classList.add('act'); } };
+      wrap.addEventListener('focusin', pick); wrap.addEventListener('pointerdown', pick);
+      attachInk(g, { host: wrap, canvas: wrap.querySelector('canvas'), list: () => sel.ink[s.path] ||= [], unit: () => k, save, size: () => [W, H] });
+      s.rerender = () => renderSlide(deck, s, slideEl, W, edited);
+      s.stickies = () => renderStickies(wrap.querySelector('.stk-layer'), sel.stickies[s.path] ||= [], k, save);
+      s.stickies();
+    });
+    select(act); deckEl.scrollTop = pptxScroll[sel.id] || 0;
+    deckEl.onscroll = () => pptxScroll[sel.id] = deckEl.scrollTop;
+    const restructure = async fn => { clearTimeout(saveT2); $('#pst').textContent = 'Saving…'; await fn(); await savePptx(sel, deck); viewFiles(sel.id); };
+    $('#pnew').onclick = () => restructure(async () => { await addSlide(deck, act, false); pptxAct[sel.id] = act + 1; });
+    $('#pdup').onclick = () => restructure(async () => { await addSlide(deck, act, true); pptxAct[sel.id] = act + 1; });
+    $('#prm').onclick = () => {
+      if (deck.slides.length < 2) return alert('A presentation needs at least one slide.');
+      if (!confirm(`Delete slide ${act + 1}?`)) return;
+      const p = deck.slides[act].path; delete sel.ink[p]; delete sel.stickies[p];
+      restructure(() => deleteSlide(deck, act));
+    };
+    $('#pstk').onclick = () => {
+      const s = deck.slides[act]; addSticky(sel.stickies[s.path] ||= []);
+      s.stickies(); deckEl.querySelectorAll('.slidewrap')[act].querySelector('.sticky:last-child textarea')?.focus();
+    };
+    $('#ptb').onclick = () => { const s = deck.slides[act]; addTextBox(deck, s); s.rerender(); edited(); };
+    $('#pdel').onclick = () => { if (!actBox?.isConnected) return alert('Click a box on a slide first.'); actBox._node.remove(); const s = deck.slides[act]; s.dirty = true; s.rerender(); actBox = null; edited(); };
+    if (window.native?.openCopy) $('#popen').onclick = async () => { clearTimeout(saveT2); const b = await savePptx(sel, deck); $('#pst').textContent = 'Saved'; window.native.openCopy(sel.name, await b.arrayBuffer()).catch(e => alert(e.message)); };
+    $('#fdl').onclick = async () => { clearTimeout(saveT2); dl(await savePptx(sel, deck), sel.name); $('#pst').textContent = 'Saved'; };
+  });
+  else idbGet('files', sel.id).then(blob => {
+    if (!blob) { $('#fbody').innerHTML = '<div class="empty">File data missing.</div>'; return; }
+    $('#fdl').onclick = () => dl(blob, sel.name);
+    pdfNative[sel.id] ? nativePdf(sel, blob) : pdfPages(sel, blob);
+  });
+}
+const pdfNative = {}, pdfZoom = {};
+let openPdf = null, pdfRun = 0; // pdf.js loading task: it holds a worker, so destroy it when the view changes
+const closePdf = () => { pdfRun++; openPdf?.destroy(); openPdf = null; };
+function nativePdf(sel, blob) { // Chromium's own viewer: zoom, print, text selection
+  closePdf();
+  const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+  $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="pview" title="Back to pages with pen and sticky notes">${icon('sticky', 16)} Notes &amp; pen view</button></div><iframe src="${url}"></iframe></div>`;
+  $('#pview').onclick = () => { pdfNative[sel.id] = false; pdfPages(sel, blob); };
+}
+function addSticky(list) {
+  list.forEach(x => x.open = false);
+  list.push({ id: uid(), x: 1000 - 60 - list.length * 34, y: 16, text: '', color: STICKY_COLORS[list.length % STICKY_COLORS.length], open: true, at: Date.now() });
+  save();
+}
+async function pdfPages(sel, blob) { // pdf.js pages, each with a pen layer and sticky notes (kept in the app, not in the PDF)
+  closePdf(); const run = pdfRun;
+  const fb = $('#fbody');
+  const zoom = pdfZoom[sel.id] || 1;
+  fb.innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="pstk" title="Add a sticky note to the selected page">${icon('sticky', 16)} Sticky</button><div class="seg" style="height:30px"><button data-pz="-1" title="Zoom out (Ctrl+−, Ctrl+scroll)">−</button><button data-pz="0" title="Fit width">${Math.round(zoom * 100)}%</button><button data-pz="1" title="Zoom in (Ctrl+=)">+</button></div><button id="pnat" title="Built-in viewer: print, select text">Native viewer</button><small id="pinfo" style="align-self:center;margin-left:6px">Loading…</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
+  $('#pnat').onclick = () => { pdfNative[sel.id] = true; nativePdf(sel, blob); };
+  const setZoom = step => { // re-lays the pages out at the new size, keeping your place
+    const d = $('#deck'), at = d ? d.scrollTop / Math.max(1, d.scrollHeight) : 0;
+    pdfZoom[sel.id] = step === 0 ? 1 : Math.max(.5, Math.min(3, zoom * (step > 0 ? 1.25 : .8)));
+    pdfPages(sel, blob).then(() => { const n = $('#deck'); if (n) n.scrollTop = at * n.scrollHeight; });
+  };
+  fb.querySelector('.seg').onclick = e => { const b = e.target.closest('[data-pz]'); if (b) setZoom(+b.dataset.pz); };
+  let wheelT; fb.onwheel = e => { if (!e.ctrlKey) return; e.preventDefault(); e.stopPropagation(); clearTimeout(wheelT); wheelT = setTimeout(() => setZoom(e.deltaY < 0 ? 1 : -1), 120); }; // property, not addEventListener: #fbody outlives re-renders
+  viewKey = e => { if ((e.ctrlKey || e.metaKey) && ['=', '+', '-', '0'].includes(e.key) && !e.target.closest?.('input,textarea')) { e.preventDefault(); setZoom(e.key === '0' ? 0 : e.key === '-' ? -1 : 1); } };
+  let pdf;
+  try {
+    const pdfjs = await import('./lib/pdfjs-dist/build/pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL('./lib/pdfjs-dist/build/pdf.worker.min.mjs', location.href).href;
+    const data = new Uint8Array(await blob.arrayBuffer()); if (run !== pdfRun) return;
+    pdf = await (openPdf = pdfjs.getDocument({ data })).promise;
+  } catch (e) { console.warn('pdf.js unavailable, using the built-in viewer', e); if (run === pdfRun) nativePdf(sel, blob); return; }
+  if (run !== pdfRun) return;
+  const deckEl = $('#deck'), g = inkGroup(fb.querySelector('.inkbar')), W = Math.round(deckWidth(deckEl) * zoom), k = W / 1000, dpr = devicePixelRatio || 1;
+  sel.ink = Array.isArray(sel.ink) || !sel.ink ? {} : sel.ink; sel.stickies ||= {};
+  let act = 0;
+  const wraps = [], select = i => { act = i; wraps.forEach((w, j) => w.classList.toggle('act', j === i)); };
+  const lazy = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { lazy.unobserve(e.target); e.target._render(); } }), { root: deckEl, rootMargin: '800px 0px' });
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i).catch(() => null); if (run !== pdfRun) return; // left this PDF while its pages were loading
+    const vp = page.getViewport({ scale: 1 }), H = W * vp.height / vp.width, key = 'p' + i;
+    const wrap = document.createElement('div'); wrap.className = 'slidewrap'; wrap.style.width = W + 'px';
+    wrap.innerHTML = `<span class="num">${i}</span><canvas class="pdfc" style="width:${W}px;height:${H}px"></canvas><canvas class="ink"></canvas><div class="stk-layer"></div>`;
+    deckEl.append(wrap); wraps.push(wrap);
+    wrap._render = () => { const c = wrap.querySelector('.pdfc'), v = page.getViewport({ scale: W / vp.width * dpr }); c.width = v.width; c.height = v.height; page.render({ canvasContext: c.getContext('2d'), viewport: v }).promise.catch(() => {}); }; // cancelled when the document closes
+    lazy.observe(wrap);
+    const pick = () => select(i - 1); wrap.addEventListener('pointerdown', pick); wrap.addEventListener('focusin', pick);
+    attachInk(g, { host: wrap, canvas: wrap.querySelector('canvas.ink'), list: () => sel.ink[key] ||= [], unit: () => k, save, size: () => [W, H] });
+    wrap._stickies = () => renderStickies(wrap.querySelector('.stk-layer'), sel.stickies[key] ||= [], k, save);
+    wrap._stickies();
+    if (i === 1) $('#pinfo').textContent = `${pdf.numPages} page${pdf.numPages > 1 ? 's' : ''}`;
+  }
+  select(0);
+  $('#pstk').onclick = () => { const w = wraps[act]; addSticky(sel.stickies['p' + (act + 1)] ||= []); w._stickies(); w.querySelector('.sticky:last-child textarea')?.focus(); };
+}
+
+/* ---------- whiteboards ---------- */
+const PW = 1400, PH = 1980; // page size in canvas pixels (A4-ish)
+const COLORS = ['#111111', '#1e5bd8', '#d32f2f', '#2e7d32', '#f9a825', '#8e24aa', '#ffffff'];
+const pen = { tool: 'pen', color: '#111111', size: 3, penOnly: false };
+function drawStroke(c, s) {
+  const P = s.pts; if (!P.length) return;
+  c.save(); c.lineCap = c.lineJoin = 'round'; c.strokeStyle = c.fillStyle = s.c;
+  if (s.t === 'hl') {
+    c.globalAlpha = .35; c.lineWidth = s.w * 5; c.beginPath(); c.moveTo(P[0], P[1]);
+    for (let i = 3; i < P.length; i += 3) c.lineTo(P[i], P[i + 1]);
+    if (P.length === 3) c.lineTo(P[0] + .1, P[1]);
+    c.stroke();
+  } else if (P.length === 3) {
+    c.beginPath(); c.arc(P[0], P[1], s.w * (.35 + 1.3 * P[2]) / 2, 0, 7); c.fill();
+  } else for (let i = 3; i < P.length; i += 3) { // width follows pen pressure
+    c.lineWidth = s.w * (.35 + 1.3 * (P[i - 1] + P[i + 2]) / 2);
+    c.beginPath(); c.moveTo(P[i - 3], P[i - 2]); c.lineTo(P[i], P[i + 1]); c.stroke();
+  }
+  c.restore();
+}
+/* infinite canvas (Microsoft Whiteboard style): items are ink strokes, sticky notes, text and images in world coordinates */
+const WB_BG = { light: { bg: '#f7f7f5', dot: '#c2c2c2', line: '#e3e3e3' }, dark: { bg: '#1c1c1c', dot: '#474747', line: '#2d2d2d' } };
+function boardMigrate(b) { // old boards were stacks of fixed pages: lay the pages out down the canvas
+  if (b.items) return b;
+  b.items = (b.pages || []).flatMap((p, i) => p.strokes.map(s => ({ k: 'ink', ...s, pts: s.pts.map((v, j) => j % 3 === 1 ? v + i * (PH + 160) : v) })));
+  delete b.pages; b.bg = ['dots', 'grid', 'lines', 'blank'].includes(b.bg) ? b.bg : 'dots';
+  return b;
+}
+function inkBox(s) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < s.pts.length; i += 3) { x0 = Math.min(x0, s.pts[i]); x1 = Math.max(x1, s.pts[i]); y0 = Math.min(y0, s.pts[i + 1]); y1 = Math.max(y1, s.pts[i + 1]); }
+  const p = s.w * (s.t === 'hl' ? 2.5 : 1);
+  return { x: x0 - p, y: y0 - p, w: x1 - x0 + 2 * p, h: y1 - y0 + 2 * p };
+}
+const itemBox = it => it.k === 'ink' ? inkBox(it) : { x: it.x, y: it.y, w: it.w, h: it.h || 40 };
+function boundsOf(items, box = itemBox) {
+  if (!items.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const it of items) { const b = box(it); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+  return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+}
+const loadImg = src => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = src; });
+function wrapText(c, text, x, y, maxW, lh, font, color) {
+  c.save(); c.font = font; c.fillStyle = color; c.textBaseline = 'top';
+  for (const para of String(text || '').split('\n')) {
+    let line = '';
+    for (const w of para.split(' ')) { const t = line ? line + ' ' + w : w; if (c.measureText(t).width > maxW && line) { c.fillText(line, x, y); y += lh; line = w; } else line = t; }
+    c.fillText(line, x, y); y += lh;
+  }
+  c.restore();
+}
+const DARK_INK = '#ececec', inkOn = (dark, col) => dark && col === '#111111' ? DARK_INK : col; // black ink reads as white on the dark canvas
+async function paintBoard(c, items, dark = false) { // ink first, then notes/text/images on top (same layering as on screen)
+  items.filter(i => i.k === 'ink').forEach(s => drawStroke(c, dark && s.c === '#111111' ? { ...s, c: DARK_INK } : s));
+  for (const it of items) {
+    if (it.k === 'img') { const im = await loadImg(it.src); if (im) c.drawImage(im, it.x, it.y, it.w, it.h); }
+    else if (it.k === 'note') { c.save(); c.shadowColor = '#0003'; c.shadowBlur = 10; c.shadowOffsetY = 3; c.fillStyle = it.color; c.fillRect(it.x, it.y, it.w, it.h); c.restore(); wrapText(c, it.text, it.x + 14, it.y + 14, it.w - 28, 24, '18px "Segoe UI"', '#2b2400'); }
+    else if (it.k === 'text') wrapText(c, it.text, it.x, it.y, it.w, it.size * 1.3, `${it.size}px "Segoe UI"`, inkOn(dark, it.color));
+  }
+}
+async function boardThumb(b) {
+  const bb = boundsOf(b.items); if (!bb) return null;
+  const c = document.createElement('canvas'); c.width = 320; c.height = 200;
+  const x = c.getContext('2d'), s = Math.min(280 / bb.w, 160 / bb.h, 1.5);
+  x.fillStyle = (b.dark ? WB_BG.dark : WB_BG.light).bg; x.fillRect(0, 0, 320, 200);
+  x.setTransform(s, 0, 0, s, 160 - (bb.x + bb.w / 2) * s, 100 - (bb.y + bb.h / 2) * s);
+  await paintBoard(x, b.items, b.dark);
+  return c.toDataURL('image/jpeg', .7);
+}
+async function shrinkImage(file, max = 1600) {
+  const url = URL.createObjectURL(file), im = await loadImg(url); URL.revokeObjectURL(url); if (!im) return null;
+  const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
+  c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+  return c.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', .88);
+}
+const pip = (x, y, poly) => { let inside = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside; } return inside; };
+
+function viewBoards() {
+  main.innerHTML = `<div class="page"><div class="row"><h1 style="flex:1">Whiteboards</h1><button class="pri" id="nbd">${icon('plus', 16)} New whiteboard</button></div>
+    <div class="cards" style="margin-top:16px">${[...S.boards].sort((a, b) => b.updated - a.updated).map(b => { const n = b.items?.length ?? (b.pages || []).reduce((a, p) => a + p.strokes.length, 0); return `<a class="card bcard" href="#/board/${b.id}">${b.thumb ? `<img src="${esc(b.thumb)}">` : '<div class="blank"></div>'}<b>${esc(b.name)}</b><small>${n} item${n === 1 ? '' : 's'} · ${ago(b.updated)}</small></a>`; }).join('')}</div>
+    ${S.boards.length ? '' : '<p class="mut">Create a whiteboard: an infinite canvas for pen, sticky notes, text and images.</p>'}</div>`;
+  $('#nbd').onclick = newBoard;
+}
+async function newBoard() {
+  const name = await ask('Whiteboard name', 'Untitled whiteboard'); if (name === null) return;
+  const b = { id: uid(), name: name.trim() || 'Untitled whiteboard', bg: 'dots', dark: false, items: [], updated: Date.now() };
+  S.boards.push(b); save(); location.hash = `#/board/${b.id}`;
+}
+
+function viewBoard(id) {
+  const b = S.boards.find(x => x.id === id); if (!b) return location.hash = '#/boards';
+  boardMigrate(b);
+  main.innerHTML = `<div class="wb"><div class="wb-top vhead"><a class="btn ibtn sq" href="#/boards" title="All whiteboards">${icon('left', 18)}</a><span class="hico">${icon('pen', 18)}</span>
+      <div class="htitle"><input id="bn" value="${esc(b.name)}" title="Click to rename"><small id="wbMeta"></small></div>
+      <span style="flex:1"></span>
+      <div class="seg" id="wbBg" title="Background">${[['dots', 'bgdots', 'Dots'], ['grid', 'bggrid', 'Grid'], ['lines', 'bglines', 'Lines'], ['blank', 'bgblank', 'Blank']].map(([v, ic, t]) => `<button data-bg="${v}" title="${t} background">${icon(ic, 16)}</button>`).join('')}</div>
+      <button id="wbTheme" class="ibtn" title="Switch canvas colour"></button>
+      <div class="seg"><button id="wbUndo" title="Undo (Ctrl+Z)">${icon('undo', 16)}</button><button id="wbRedo" title="Redo (Ctrl+Y)">${icon('redo', 16)}</button></div>
+      <button id="wbPng" class="ibtn" title="Export the whole board as a PNG image">${icon('download', 16)} Export</button><button id="wbDel" class="ibtn sq danger" title="Delete whiteboard">${icon('trash', 16)}</button></div>
+    <div class="wb-stage" id="stage"><canvas id="wbc"></canvas><div class="wb-objs" id="wbo"></div><canvas id="wbl"></canvas>
+      <div class="wb-selbox" id="wbsel" hidden><div class="wb-selbar"></div><span class="wb-h" title="Drag to resize"></span></div>
+      <div class="wb-tools">
+        <button data-t="select" title="Lasso select (V) — drag around ink and items">${icon('lasso', 18)}</button><button data-t="pen" title="Pen (P)">${icon('pen', 18)}</button><button data-t="hl" title="Highlighter (H)">${icon('marker', 18)}</button><button data-t="eraser" title="Eraser (E) — pen eraser end and right-drag also erase">${icon('eraser', 18)}</button><span class="vs"></span>
+        ${COLORS.map(c => `<button class="sw" data-col="${c}" style="background:${c}"></button>`).join('')}<input type="range" id="wbSz" min="1" max="24" value="${pen.size}" title="Pen size"><span class="vs"></span>
+        <button data-t="text" title="Text (T) — click to type">${icon('text', 18)}</button><button data-t="note" title="Sticky note (N) — click to place">${icon('sticky', 18)}</button><button data-a="img" title="Insert image (or paste / drag one in)">${icon('image', 18)}</button><span class="vs"></span>
+        <button data-a="shapes" title="Ink to shape (Ctrl+Shift+S)">◯△</button><button data-a="scratch" title="Scratch-out: scribble over ink to erase">✗≈</button><button data-a="finger" title="Finger draws (iPad / touchscreen) — off: one finger pans. Two fingers always pan and pinch-zoom">☝</button>
+      </div>
+      <div class="wb-zoom"><button data-z="out" title="Zoom out (Ctrl+−)">−</button><button data-z="reset" id="wbZl" title="Back to 100%">100%</button><button data-z="in" title="Zoom in (Ctrl+=)">+</button><button data-z="fit" title="Fit everything on screen">${icon('fit', 15)}</button></div>
+      <input type="file" id="wbImg" accept="image/*" multiple hidden></div></div>`;
+  const stage = $('#stage'), cv = $('#wbc'), ov = $('#wbl'), objs = $('#wbo'), selBox = $('#wbsel'), cx = cv.getContext('2d'), lx = ov.getContext('2d');
+  const dpr = devicePixelRatio || 1, sel = new Set(), boxes = new WeakMap();
+  let V = b.view ? { ...b.view } : null, W = 0, H = 0, act = null, space = false, raf = 0, clip = null, viewT, thumbT;
+  let tool = ['select', 'pen', 'hl', 'eraser', 'text', 'note'].includes(pen.tool) ? pen.tool : 'pen';
+  const box = it => it.k === 'ink' ? (boxes.get(it) || (boxes.set(it, inkBox(it)), boxes.get(it))) : itemBox(it);
+  const toW = (sx, sy) => [(sx - V.ox) / V.z, (sy - V.oy) / V.z];
+  const local = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const elOf = it => [...objs.children].find(e => e._it === it);
+
+  // ---- history (ponytail: whole-board JSON snapshots, 60 deep; switch to per-op diffs if boards get huge)
+  const hist = [JSON.stringify(b.items)]; let hi = 0;
+  const changed = () => { b.updated = Date.now(); save(); syncTools(); clearTimeout(thumbT); thumbT = setTimeout(async () => { b.thumb = await boardThumb(b); save(); }, 1500); };
+  const commit = () => { hist.splice(hi + 1); hist.push(JSON.stringify(b.items)); if (hist.length > 60) hist.shift(); hi = hist.length - 1; changed(); };
+  const restore = i => { hi = i; b.items = JSON.parse(hist[hi]); sel.clear(); renderObjs(); redraw(); changed(); };
+  const undo = () => hi > 0 && restore(hi - 1), redo = () => hi < hist.length - 1 && restore(hi + 1);
+
+  // ---- drawing
+  function redraw() {
+    const th = b.dark ? WB_BG.dark : WB_BG.light;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.fillStyle = th.bg; cx.fillRect(0, 0, W, H);
+    let step = 32 * V.z; while (step < 14) step *= 2;
+    const sx = ((V.ox % step) + step) % step, sy = ((V.oy % step) + step) % step;
+    cx.fillStyle = th.dot; cx.strokeStyle = th.line; cx.lineWidth = 1; cx.beginPath();
+    if (b.bg === 'dots') for (let x = sx; x < W; x += step) for (let y = sy; y < H; y += step) cx.fillRect(x - 1, y - 1, 2, 2);
+    if (b.bg === 'grid') for (let x = sx; x < W; x += step) { cx.moveTo(Math.round(x) + .5, 0); cx.lineTo(Math.round(x) + .5, H); }
+    if (b.bg === 'grid' || b.bg === 'lines') for (let y = sy; y < H; y += step) { cx.moveTo(0, Math.round(y) + .5); cx.lineTo(W, Math.round(y) + .5); }
+    cx.stroke();
+    cx.setTransform(dpr * V.z, 0, 0, dpr * V.z, dpr * V.ox, dpr * V.oy);
+    const [vx0, vy0] = toW(0, 0), [vx1, vy1] = toW(W, H);
+    for (const it of b.items) if (it.k === 'ink') { const q = box(it); if (q.x <= vx1 && q.y <= vy1 && q.x + q.w >= vx0 && q.y + q.h >= vy0) drawStroke(cx, b.dark && it.c === '#111111' ? { ...it, c: DARK_INK } : it); }
+    objs.style.transform = `translate(${V.ox}px,${V.oy}px) scale(${V.z})`;
+    $('#wbZl').textContent = Math.round(V.z * 100) + '%';
+    placeSel();
+  }
+  const sched = () => { raf ||= requestAnimationFrame(() => { raf = 0; redraw(); }); };
+  const clearLive = () => { lx.setTransform(1, 0, 0, 1, 0, 0); lx.clearRect(0, 0, ov.width, ov.height); lx.setTransform(dpr * V.z, 0, 0, dpr * V.z, dpr * V.ox, dpr * V.oy); };
+  function renderObjs() {
+    objs.innerHTML = '';
+    for (const it of b.items) {
+      if (it.k === 'ink') continue;
+      const el = document.createElement('div'); el.className = `wbo wb-${it.k}${sel.has(it) ? ' on' : ''}`; el._it = it;
+      Object.assign(el.style, { left: it.x + 'px', top: it.y + 'px', width: it.w + 'px', height: it.k === 'text' ? 'auto' : it.h + 'px', background: it.k === 'note' ? it.color : '', color: it.k === 'text' ? inkOn(b.dark, it.color) : '', fontSize: it.k === 'text' ? it.size + 'px' : '' });
+      el.innerHTML = it.k === 'img' ? `<img src="${esc(it.src)}" draggable="false">` : `<div class="wbt">${esc(it.text)}</div>`;
+      objs.append(el);
+      if (it.k === 'text') it.h = el.offsetHeight;
+    }
+  }
+
+  // ---- view: pan / zoom / fit
+  const saveView = () => { clearTimeout(viewT); viewT = setTimeout(() => { b.view = { ...V }; save(); }, 400); };
+  const zoomAt = (sx, sy, f) => { const [wx, wy] = toW(sx, sy); V.z = Math.max(.1, Math.min(8, V.z * f)); V.ox = sx - wx * V.z; V.oy = sy - wy * V.z; sched(); saveView(); };
+  function fit() {
+    const bb = boundsOf(b.items, box);
+    if (!bb) V = { ox: W / 2, oy: H / 2, z: 1 };
+    else { const z = Math.max(.1, Math.min(2, (W - 120) / bb.w, (H - 160) / bb.h)); V = { z, ox: W / 2 - (bb.x + bb.w / 2) * z, oy: H / 2 - (bb.y + bb.h / 2) * z }; }
+    sched(); saveView();
+  }
+  function resize() {
+    W = stage.clientWidth; H = stage.clientHeight;
+    for (const c of [cv, ov]) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    if (!V) fit(); redraw();
+  }
+
+  // ---- selection
+  const selBounds = () => boundsOf([...sel], box);
+  function placeSel() {
+    if (!sel.size) { selBox.hidden = true; return; }
+    const q = selBounds(); selBox.hidden = false;
+    Object.assign(selBox.style, { left: q.x * V.z + V.ox - 6 + 'px', top: q.y * V.z + V.oy - 6 + 'px', width: q.w * V.z + 12 + 'px', height: q.h * V.z + 12 + 'px' });
+  }
+  function showSel() {
+    objs.querySelectorAll('.wbo').forEach(el => el.classList.toggle('on', sel.has(el._it)));
+    const notes = [...sel].some(i => i.k === 'note');
+    selBox.querySelector('.wb-selbar').innerHTML = `${hwOn() && [...sel].some(i => i.k === 'ink' && i.t !== 'hl') ? '<button data-s="text" title="Convert the selected handwriting to a text box">Aa To text</button><span class="vs"></span>' : ''}<button data-s="dup" title="Duplicate (Ctrl+D)">Duplicate</button><span class="vs"></span>${(notes ? STICKY_COLORS : COLORS).map(c => `<button class="sw" data-c="${c}" style="background:${c}" title="Colour"></button>`).join('')}<span class="vs"></span><button data-s="del" title="Delete (Del)">${icon('trash', 14)}</button>`;
+    placeSel();
+  }
+  const clearSel = () => { if (sel.size) { sel.clear(); showSel(); } };
+  const shift = (it, d) => { it.id = uid(); if (it.k === 'ink') it.pts = it.pts.map((v, i) => i % 3 === 2 ? v : v + d); else { it.x += d; it.y += d; } return it; };
+  const addCopies = (list, d) => { const copies = list.map(it => shift(JSON.parse(JSON.stringify(it)), d)); b.items.push(...copies); sel.clear(); copies.forEach(c => sel.add(c)); commit(); renderObjs(); redraw(); showSel(); };
+  const delSel = () => { if (!sel.size) return; b.items = b.items.filter(i => !sel.has(i)); sel.clear(); commit(); renderObjs(); redraw(); showSel(); };
+  const recolor = c => { for (const it of sel) { if (it.k === 'note') { if (STICKY_COLORS.includes(c)) it.color = c; } else if (it.k === 'ink') it.c = c; else if (it.k === 'text') it.color = c; } commit(); renderObjs(); redraw(); showSel(); };
+  function moveSel(dx, dy) {
+    for (const it of sel) {
+      if (it.k === 'ink') { for (let i = 0; i < it.pts.length; i += 3) { it.pts[i] += dx; it.pts[i + 1] += dy; } boxes.delete(it); }
+      else { it.x += dx; it.y += dy; const el = elOf(it); if (el) { el.style.left = it.x + 'px'; el.style.top = it.y + 'px'; } }
+    }
+    sched();
+  }
+  function finishLasso(poly) {
+    const q = boundsOf(poly.map(([x, y]) => ({ k: 'p', x, y, w: 0, h: 0 })));
+    if (poly.length < 3 || q.w * V.z < 6 || q.h * V.z < 6) return showSel();
+    for (const it of b.items) {
+      if (it.k === 'ink') { let n = 0, c = 0; for (let i = 0; i < it.pts.length; i += 3) { c++; if (pip(it.pts[i], it.pts[i + 1], poly)) n++; } if (c && n / c >= .5) sel.add(it); }
+      else if (pip(it.x + it.w / 2, it.y + (it.h || 40) / 2, poly)) sel.add(it);
+    }
+    showSel();
+  }
+
+  // ---- text & notes editing
+  function edit(el) {
+    const it = el?._it; if (!it || it.k === 'img') return;
+    const t = el.querySelector('.wbt'); t.contentEditable = 'true'; t.focus();
+    const s = getSelection(); s.selectAllChildren(t); s.collapseToEnd();
+    t.onkeydown = e => { if (e.key === 'Escape') t.blur(); e.stopPropagation(); };
+    t.onblur = () => {
+      t.contentEditable = 'false'; const v = t.innerText.replace(/\n$/, '');
+      if (it.k === 'text' && !v.trim()) { b.items = b.items.filter(i => i !== it); commit(); renderObjs(); return; }
+      if (v !== it.text) { it.text = v; commit(); renderObjs(); }
+    };
+  }
+
+  // ---- tools
+  function setTool(t) {
+    tool = t; if (['pen', 'hl', 'eraser', 'select'].includes(t)) pen.tool = t;
+    stage.dataset.tool = t; stage.classList.toggle('objmode', ['select', 'text', 'note'].includes(t));
+    if (t !== 'select') clearSel();
+    syncTools();
+  }
+  function syncTools() {
+    main.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('on', x.dataset.t === tool));
+    main.querySelectorAll('.wb-tools [data-col]').forEach(x => x.classList.toggle('on', x.dataset.col === pen.color));
+    main.querySelector('[data-a=shapes]').classList.toggle('on', inkState.shapes); main.querySelector('[data-a=scratch]').classList.toggle('on', inkState.scratch); main.querySelector('[data-a=finger]').classList.toggle('on', inkState.mode === 'draw');
+    $('#wbTheme').innerHTML = b.dark ? `${icon('sun', 16)} Light` : `${icon('moon', 16)} Dark`;
+    main.querySelectorAll('[data-bg]').forEach(x => x.classList.toggle('on', x.dataset.bg === b.bg));
+    $('#wbMeta').textContent = `${b.items.length} item${b.items.length === 1 ? '' : 's'} · edited ${ago(b.updated)}`;
+  }
+  boardSync = () => { if (['pen', 'eraser'].includes(pen.tool) && pen.tool !== tool) setTool(pen.tool); else syncTools(); };
+  async function addImages(files, at) {
+    const [cx0, cy0] = at || toW(W / 2, H / 2); let off = 0; sel.clear();
+    for (const f of files) {
+      if (!f.type?.startsWith('image/')) continue;
+      const src = await shrinkImage(f), im = src && await loadImg(src); if (!im) continue;
+      const w = Math.min(im.naturalWidth, 600) / V.z, h = w * im.naturalHeight / im.naturalWidth;
+      const it = { k: 'img', id: uid(), x: cx0 - w / 2 + off, y: cy0 - h / 2 + off, w, h, src }; b.items.push(it); sel.add(it); off += 30;
+    }
+    if (!sel.size) return;
+    commit(); renderObjs(); setTool('select'); sel.size || 0; showSel();
+  }
+  function eraseAt(wx, wy) {
+    const R2 = (Math.max(8, pen.size * 3) / V.z) ** 2; let hit = false;
+    b.items = b.items.filter(it => {
+      if (it.k !== 'ink') return true;
+      const q = box(it), r = Math.sqrt(R2); if (wx < q.x - r || wx > q.x + q.w + r || wy < q.y - r || wy > q.y + q.h + r) return true;
+      for (let i = 0; i < it.pts.length; i += 3) if ((it.pts[i] - wx) ** 2 + (it.pts[i + 1] - wy) ** 2 < R2) { act.removed.push(it); hit = true; return false; }
+      return true;
+    });
+    if (hit) sched();
+  }
+  const addPt = e => {
+    const r = stage.getBoundingClientRect(), list = e.getCoalescedEvents?.();
+    for (const v of list?.length ? list : [e]) { const [x, y] = toW(v.clientX - r.left, v.clientY - r.top); act.s.pts.push(Math.round(x * 10) / 10, Math.round(y * 10) / 10, v.pointerType === 'pen' ? Math.round((v.pressure || .5) * 100) / 100 : .5); }
+    clearLive(); drawStroke(lx, act.s);
+  };
+
+  // ---- pointer input: pen/mouse draw, touch pans, two fingers pinch, Space/middle-drag pans
+  const ptrs = new Map(); let actPtr = null; // the pointer that owns the current action — a palm landing mid-stroke must not join in
+  let actTouch = false;
+  const other = e => act && act.k !== 'pinch' && actPtr != null && e.pointerId !== actPtr;
+  stage.oncontextmenu = e => e.preventDefault();
+  stage.onpointerdown = e => {
+    if (e.target.closest('.wb-tools,.wb-zoom,.wb-selbox,[contenteditable=true]')) return;
+    if (e.pointerType === 'touch' && act && actPtr != null && act.k !== 'pan' && !actTouch) return; // palm while the pen draws, erases or selects (a finger stroke + second finger = pinch)
+    try { stage.setPointerCapture(e.pointerId); } catch { }
+    actPtr = e.pointerId; actTouch = e.pointerType === 'touch';
+    ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+    if (ptrs.size === 2) { if (act?.moved || act?.removed?.length) commit(); const [p, q] = [...ptrs.values()]; act = { k: 'pinch', d: Math.hypot(p[0] - q[0], p[1] - q[1]), m: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] }; clearLive(); return; }
+    const [sx, sy] = local(e), [wx, wy] = toW(sx, sy);
+    if ((e.pointerType === 'touch' && (inkState.mode !== 'draw' || tool === 'select')) || e.button === 1 || space || e.ctrlKey || (pen.penOnly && e.pointerType === 'mouse' && tool !== 'select')) { act = { k: 'pan', sx: e.clientX, sy: e.clientY, ox: V.ox, oy: V.oy }; stage.classList.add('panning'); return; }
+    const objEl = e.target.closest('.wbo');
+    if (tool === 'eraser' || e.button === 2 || e.button === 5 || (e.buttons & 32)) { act = { k: 'erase', removed: [] }; eraseAt(wx, wy); return; }
+    if (tool === 'pen' || tool === 'hl') { act = { k: 'ink', s: { k: 'ink', t: tool, c: pen.color, w: pen.size / V.z, pts: [] } }; addPt(e); return; }
+    if (tool === 'text' || tool === 'note') {
+      e.preventDefault();
+      if (objEl) return edit(objEl);
+      const it = tool === 'note' ? { k: 'note', id: uid(), x: wx - 100, y: wy - 100, w: 200, h: 200, text: '', color: STICKY_COLORS[0] }
+        : { k: 'text', id: uid(), x: wx, y: wy - 16 / V.z, w: 360 / V.z, text: '', size: Math.round(24 / V.z * 10) / 10, color: pen.color === '#ffffff' && !b.dark ? '#111111' : pen.color };
+      b.items.push(it); if (it.k === 'note') commit(); renderObjs(); setTimeout(() => edit(elOf(it))); return;
+    }
+    if (objEl) { const it = objEl._it; if (!sel.has(it)) { sel.clear(); sel.add(it); showSel(); } act = { k: 'move', wx, wy, moved: false }; return; }
+    clearSel(); act = { k: 'lasso', pts: [[wx, wy]] };
+  };
+  selBox.onpointerdown = e => {
+    if (e.target.closest('.wb-selbar')) return;
+    e.stopPropagation(); e.preventDefault(); try { stage.setPointerCapture(e.pointerId); } catch { }
+    actPtr = e.pointerId; const [wx, wy] = toW(...local(e));
+    act = e.target.classList.contains('wb-h') ? { k: 'scale', wx, q: selBounds(), orig: [...sel].map(it => [it, JSON.parse(JSON.stringify({ ...it, src: undefined }))]) } : { k: 'move', wx, wy, moved: false };
+  };
+  stage.onpointermove = e => {
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+    if (!act || other(e)) return;
+    if (act.k === 'pinch') {
+      if (ptrs.size < 2) return; const [p, q] = [...ptrs.values()], d = Math.hypot(p[0] - q[0], p[1] - q[1]), m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+      V.ox += m[0] - act.m[0]; V.oy += m[1] - act.m[1]; const r = stage.getBoundingClientRect(); zoomAt(m[0] - r.left, m[1] - r.top, d / act.d); act.d = d; act.m = m; return;
+    }
+    if (act.k === 'pan') { V.ox = act.ox + e.clientX - act.sx; V.oy = act.oy + e.clientY - act.sy; sched(); return; }
+    const [wx, wy] = toW(...local(e));
+    if (act.k === 'ink') addPt(e);
+    else if (act.k === 'erase') eraseAt(wx, wy);
+    else if (act.k === 'lasso') { act.pts.push([wx, wy]); clearLive(); lx.setLineDash([6 / V.z, 5 / V.z]); lx.lineWidth = 1.5 / V.z; lx.strokeStyle = b.dark ? '#bbb' : '#555'; lx.beginPath(); act.pts.forEach(([x, y], i) => i ? lx.lineTo(x, y) : lx.moveTo(x, y)); lx.stroke(); lx.setLineDash([]); }
+    else if (act.k === 'move') { const dx = wx - act.wx, dy = wy - act.wy; if (dx || dy) { act.wx = wx; act.wy = wy; act.moved = true; moveSel(dx, dy); } }
+    else if (act.k === 'scale') {
+      const q = act.q, f = Math.max(.05, (q.w + wx - act.wx) / q.w);
+      for (const [it, o] of act.orig) {
+        if (it.k === 'ink') { it.pts = o.pts.map((v, i) => i % 3 === 0 ? q.x + (v - q.x) * f : i % 3 === 1 ? q.y + (v - q.y) * f : v); it.w = o.w * f; boxes.delete(it); }
+        else { it.x = q.x + (o.x - q.x) * f; it.y = q.y + (o.y - q.y) * f; it.w = o.w * f; if (it.k !== 'text') it.h = o.h * f; else it.size = o.size * f; }
+      }
+      act.moved = true; renderObjs(); showSel(); sched();
+    }
+  };
+  stage.onpointerup = stage.onpointercancel = e => {
+    ptrs.delete(e.pointerId);
+    if (other(e)) return;
+    stage.classList.remove('panning');
+    if (!act || (act.k === 'pinch' && ptrs.size)) return;
+    const a = act; act = null; actPtr = null; clearLive();
+    if (a.k === 'pan' || a.k === 'pinch') return saveView();
+    if (a.k === 'ink' && a.s.pts.length) {
+      const r = a.s.t === 'pen' ? smartInk(a.s, b.items.filter(i => i.k === 'ink'), 48 / V.z) : null;
+      if (r?.erase) b.items = b.items.filter(i => !r.erase.includes(i)); else { if (r?.shape) a.s.pts = r.shape; b.items.push(a.s); }
+      commit(); redraw();
+    }
+    if (a.k === 'erase' && a.removed.length) commit();
+    if (a.k === 'lasso') finishLasso(a.pts);
+    if ((a.k === 'move' || a.k === 'scale') && a.moved) commit();
+  };
+  stage.ondblclick = e => { if (tool !== 'select') return; const el = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.classList.contains('wbo')); if (el) { clearSel(); edit(el); } };
+  stage.onwheel = e => {
+    e.preventDefault();
+    if (e.ctrlKey) zoomAt(...local(e), Math.exp(-e.deltaY * .0015));
+    else { V.ox -= e.shiftKey ? e.deltaY : e.deltaX; V.oy -= e.shiftKey ? 0 : e.deltaY; sched(); saveView(); }
+  };
+  stage.ondragover = e => e.preventDefault();
+  stage.ondrop = e => { e.preventDefault(); addImages([...e.dataTransfer.files], toW(...local(e))); };
+
+  // ---- toolbars
+  main.querySelector('.wb-tools').onclick = e => {
+    const t = e.target.closest('button'); if (!t) return;
+    if (t.dataset.t) setTool(t.dataset.t);
+    if (t.dataset.col) { pen.color = t.dataset.col; if (sel.size) recolor(pen.color); else if (!['pen', 'hl', 'text'].includes(tool)) setTool('pen'); syncTools(); }
+    if (t.dataset.a === 'img') $('#wbImg').click();
+    if (t.dataset.a === 'shapes') { toggleShapes(); syncTools(); }
+    if (t.dataset.a === 'finger') { inkState.mode = inkState.mode === 'draw' ? 'pen' : 'draw'; refreshInkUI(); syncTools(); toast(inkState.mode === 'draw' ? '☝ Finger draws — two fingers pan' : 'One finger pans — pen draws'); }
+    if (t.dataset.a === 'scratch') { inkState.scratch = !inkState.scratch; syncTools(); }
+  };
+  $('#wbSz').oninput = e => pen.size = +e.target.value;
+  $('#wbImg').onchange = e => { addImages([...e.target.files]); e.target.value = ''; };
+  selBox.querySelector('.wb-selbar').onclick = e => {
+    const t = e.target.closest('button'); if (!t) return;
+    if (t.dataset.s === 'dup') addCopies([...sel], 30 / V.z);
+    if (t.dataset.s === 'text') {
+      const strokes = [...sel].filter(i => i.k === 'ink' && i.t !== 'hl'), q = boundsOf(strokes, box);
+      recognizeInk(strokes).then(txt => txt != null && inkTextDialog(txt, 'insert', (v, keep) => {
+        const size = Math.max(10, Math.min(160, q.h / v.split('\n').length * .6));
+        const it = { k: 'text', id: uid(), x: q.x, y: q.y, w: Math.max(q.w * 1.15, size * 6), text: v, size, color: strokes[0].c };
+        if (!keep) b.items = b.items.filter(i => !strokes.includes(i));
+        b.items.push(it); sel.clear(); sel.add(it); commit(); renderObjs(); redraw(); showSel();
+      }));
+    }
+    if (t.dataset.s === 'del') delSel();
+    if (t.dataset.c) recolor(t.dataset.c);
+  };
+  main.querySelector('.wb-zoom').onclick = e => {
+    const z = e.target.closest('button')?.dataset.z; if (!z) return;
+    if (z === 'fit') return fit();
+    if (z === 'reset') return zoomAt(W / 2, H / 2, 1 / V.z);
+    zoomAt(W / 2, H / 2, z === 'in' ? 1.25 : .8);
+  };
+  $('#wbUndo').onclick = undo; $('#wbRedo').onclick = redo;
+  $('#wbBg').onclick = e => { const t = e.target.closest('[data-bg]'); if (!t) return; b.bg = t.dataset.bg; syncTools(); redraw(); changed(); };
+  $('#wbTheme').onclick = () => { b.dark = !b.dark; syncTools(); renderObjs(); redraw(); changed(); };
+  $('#bn').oninput = e => { b.name = e.target.value; changed(); };
+  $('#wbDel').onclick = () => { if (confirm(`Move whiteboard "${b.name}" to the trash?`)) { trashBoard(b); location.hash = '#/boards'; } };
+  $('#wbPng').onclick = async () => {
+    const bb = boundsOf(b.items, box); if (!bb) return toast('Nothing on this board yet');
+    const pad = 40, s = Math.min(2, 8000 / (Math.max(bb.w, bb.h) + pad * 2)), c = document.createElement('canvas');
+    c.width = Math.ceil((bb.w + pad * 2) * s); c.height = Math.ceil((bb.h + pad * 2) * s);
+    const x = c.getContext('2d'); x.fillStyle = (b.dark ? WB_BG.dark : WB_BG.light).bg; x.fillRect(0, 0, c.width, c.height);
+    x.setTransform(s, 0, 0, s, (pad - bb.x) * s, (pad - bb.y) * s); await paintBoard(x, b.items, b.dark);
+    c.toBlob(bl => dl(bl, `${b.name}.png`));
+  };
+
+  // ---- keyboard (Microsoft Whiteboard-like)
+  viewKey = e => {
+    if (e.target.closest?.('[contenteditable=true],input,textarea,select')) return;
+    const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey, go = f => { e.preventDefault(); f(); };
+    if (e.code === 'Space') return go(() => { space = true; stage.classList.add('panready'); });
+    if (e.key === 'Control') return stage.classList.add('panready'); // Ctrl + drag pans
+    if (mod && k === 'z' && !e.shiftKey) return go(undo);
+    if (mod && (k === 'y' || (k === 'z' && e.shiftKey))) return go(redo);
+    if (mod && k === 'a') return go(() => { setTool('select'); b.items.forEach(i => sel.add(i)); showSel(); });
+    if (mod && k === 'd') return go(() => sel.size && addCopies([...sel], 30 / V.z));
+    if (mod && k === 'c' && sel.size) return go(() => { clip = JSON.stringify([...sel]); toast(`Copied ${sel.size} item${sel.size > 1 ? 's' : ''}`); });
+    if (mod && (k === '=' || k === '+')) return go(() => zoomAt(W / 2, H / 2, 1.25));
+    if (mod && k === '-') return go(() => zoomAt(W / 2, H / 2, .8));
+    if (mod && k === '0') return go(() => zoomAt(W / 2, H / 2, 1 / V.z));
+    if (mod && k === '1') return go(fit);
+    if (k === 'delete' || k === 'backspace') return go(delSel);
+    if (k === 'escape') return clearSel();
+    if (!mod && !e.altKey) { const t = { v: 'select', p: 'pen', h: 'hl', e: 'eraser', t: 'text', n: 'note' }[k]; if (t) return go(() => setTool(t)); }
+  };
+  viewKeyUp = e => { if (e.code === 'Space') space = false; if (e.code === 'Space' || e.key === 'Control') stage.classList.toggle('panready', space); };
+  addEventListener('blur', () => stage.classList.remove('panready'), { once: true });
+  viewPaste = e => {
+    if (e.target.closest?.('[contenteditable=true],input,textarea')) return;
+    const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+    if (files.length) { e.preventDefault(); addImages(files); }
+    else if (clip) { e.preventDefault(); addCopies(JSON.parse(clip), 40 / V.z); }
+  };
+
+  renderObjs(); setTool(tool);
+  const ro = new ResizeObserver(() => stage.isConnected ? resize() : ro.disconnect()); ro.observe(stage);
+}
+
+/* ---------- appearance: colour themes + background designs ---------- */
+const hsl = (h, s, l) => { s /= 100; l /= 100; const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join(''); };
+const THEME_KEYS = ['s0', 's1', 's2', 's3', 's4', 's5', 's6', 't4', 't5', 'mut', 't3', 't2', 'tx', 't1', 'acc', 'acc-h', 'acc2'];
+const GRAPHITE = { s0: '#111111', s1: '#1b1b1b', s2: '#232323', s3: '#2b2b2b', s4: '#333333', s5: '#3a3a3a', s6: '#555555', t4: '#777777', t5: '#8a8a8a', mut: '#9a9a9a', t3: '#bbbbbb', t2: '#d0d0d0', tx: '#e9e9e9', t1: '#ffffff', acc: '#00a82d', 'acc-h': '#00b832', acc2: '#2dbe60' };
+const THEMES = { // hue/sat build the surfaces and tinted text; acc = buttons, acc2 = highlights and designs
+  graphite: { name: 'Graphite', sub: 'grey & green' },
+  maroon: { name: 'Maroon', sub: 'deep wine & rose', hue: 345, sat: 38, acc: '#b23a5a', accH: '#c4476a', acc2: '#ec9db2' },
+  mauve: { name: 'Mauve', sub: 'dusty violet', hue: 295, sat: 16, acc: '#8e5fa8', accH: '#9d6db8', acc2: '#d3abe6' },
+  midnight: { name: 'Midnight', sub: 'navy & blue', hue: 222, sat: 32, acc: '#2f6fd6', accH: '#3b7ce6', acc2: '#8db8ff' },
+  forest: { name: 'Forest', sub: 'pine & sage', hue: 152, sat: 22, acc: '#2f8f5b', accH: '#38a068', acc2: '#8fd6ae' },
+  mocha: { name: 'Mocha', sub: 'coffee & caramel', hue: 24, sat: 22, acc: '#b0703f', accH: '#c07d4a', acc2: '#e8b48c' }
+};
+function themeVars(id) {
+  const t = THEMES[id]; if (!t?.acc) return { ...GRAPHITE };
+  const v = {}, L = [6, 9, 11.5, 14.5, 17.5, 21, 31], T = [47, 54, 61, 72, 82, 91, 98];
+  ['s0', 's1', 's2', 's3', 's4', 's5', 's6'].forEach((k, i) => v[k] = hsl(t.hue, t.sat, L[i]));
+  ['t4', 't5', 'mut', 't3', 't2', 'tx', 't1'].forEach((k, i) => v[k] = hsl(t.hue, Math.min(t.sat, 30) * (i < 3 ? .5 : .3), T[i]));
+  return Object.assign(v, { acc: t.acc, 'acc-h': t.accH, acc2: t.acc2 });
+}
+// designs: SVG tiles in the theme's highlight colour with soft white outlines (k = strength)
+const petalPath = (len, wid) => `M0 0C${-wid} ${-len * .3} ${-wid * .9} ${-len * .85} 0 ${-len}C${wid * .9} ${-len * .85} ${wid} ${-len * .3} 0 0Z`;
+const ring = (n, len, wid, off) => Array.from({ length: n }, (_, i) => `<path d="${petalPath(len, wid)}" transform="rotate(${off + i * 360 / n})"/>`).join('');
+const rose = (x, y, s, r) => `<g transform="translate(${x} ${y}) rotate(${r}) scale(${s})">${ring(6, 30, 17, 0)}${ring(5, 21, 12, 30)}${ring(4, 12, 8, 50)}<path d="M-4 1a4.5 4.5 0 1 1 4 4" fill="none"/></g>`;
+const leaf = (x, y, s, r) => `<g transform="translate(${x} ${y}) rotate(${r}) scale(${s})"><path d="M0 0C8 -10 26 -12 38 -2C26 8 10 8 0 0Z"/><path d="M3 -1L33 -2" fill="none"/></g>`;
+const blossom = (x, y, s, r) => `<g transform="translate(${x} ${y}) rotate(${r}) scale(${s})">${Array.from({ length: 5 }, (_, i) => `<path d="M0 0C-9 -4 -10 -16 -3.5 -20L0 -17L3.5 -20C10 -16 9 -4 0 0Z" transform="rotate(${i * 72})"/>`).join('')}<circle r="3.2"/></g>`;
+const sparkle = (x, y, s) => `<path transform="translate(${x} ${y}) scale(${s})" d="M0 -10C1 -2 2 -1 10 0C2 1 1 2 0 10C-1 2 -2 1 -10 0C-2 -1 -1 -2 0 -10Z"/>`;
+const sprig = (x, y, s, r) => `<g transform="translate(${x} ${y}) rotate(${r}) scale(${s})"><path d="M0 0C20 -6 44 -6 70 4" fill="none"/>${[[14, -3, -40], [26, -4, 35], [40, -3, -35], [53, -1, 40], [66, 3, -10]].map(([a, b, c]) => leaf(a, b, .55, c)).join('')}</g>`;
+const DESIGNS = {
+  roses: { name: 'Roses', size: 320, svg: (c, k) => `<g fill="${c.leaf}" fill-opacity="${.13 * k}" stroke="#fff" stroke-opacity="${.18 * k}" stroke-width="1">${leaf(118, 120, 1, 30)}${leaf(60, 100, .9, 200)}${leaf(262, 226, .8, 60)}${leaf(208, 196, .75, 170)}${leaf(128, 270, .65, -20)}${leaf(36, 196, .5, 120)}</g><g fill="${c.fl}" fill-opacity="${.2 * k}" stroke="#fff" stroke-opacity="${.34 * k}" stroke-width="1.1" stroke-linejoin="round">${rose(88, 92, 1.15, 10)}${rose(240, 205, .85, 40)}${rose(112, 252, .62, -20)}${rose(258, 62, .38, 15)}${rose(40, 186, .34, 60)}${rose(196, 296, .3, 0)}</g>` },
+  blossoms: { name: 'Blossoms', size: 280, svg: (c, k) => `<g fill="${c.fl}" fill-opacity="${.22 * k}" stroke="#fff" stroke-opacity="${.34 * k}" stroke-width="1" stroke-linejoin="round">${blossom(70, 70, 1.1, 10)}${blossom(200, 120, .8, 40)}${blossom(110, 200, .9, -15)}${blossom(230, 240, .6, 20)}${blossom(30, 250, .5, 0)}${blossom(250, 30, .45, 30)}${blossom(160, 30, .35, 5)}</g><g fill="${c.fl}" fill-opacity="${.18 * k}" stroke="#fff" stroke-opacity="${.25 * k}" stroke-width=".8">${[[150, 160, 30], [40, 150, -40], [260, 180, 70], [180, 255, 10], [120, 120, 100]].map(([x, y, r]) => `<path transform="translate(${x} ${y}) rotate(${r}) scale(.8)" d="M0 0C-9 -4 -10 -16 -3.5 -20L0 -17L3.5 -20C10 -16 9 -4 0 0Z"/>`).join('')}</g>` },
+  leaves: { name: 'Leaves', size: 300, svg: (c, k) => `<g fill="${c.fl}" fill-opacity="${.16 * k}" stroke="#fff" stroke-opacity="${.28 * k}" stroke-width="1.1" stroke-linecap="round">${sprig(20, 80, 1.3, -15)}${sprig(150, 170, 1.1, 25)}${sprig(40, 240, .9, -35)}${sprig(190, 40, .8, 10)}</g>` },
+  stars: { name: 'Stars', size: 260, svg: (c, k) => `<g fill="${c.fl}" fill-opacity="${.45 * k}">${sparkle(50, 60, 1.1)}${sparkle(190, 40, .6)}${sparkle(140, 150, .9)}${sparkle(40, 200, .5)}${sparkle(220, 210, .75)}${sparkle(100, 235, .35)}</g><g fill="#fff" fill-opacity="${.32 * k}">${[[20, 20, 1.2], [90, 100, .9], [230, 110, 1.3], [170, 220, .8], [60, 140, .7], [120, 20, .9], [250, 170, .7], [10, 110, .8], [200, 160, .6], [140, 90, .5]].map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}"/>`).join('')}</g><path d="M215 236a12 12 0 1 0 12 -18a9 9 0 1 1 -12 18Z" fill="${c.fl}" fill-opacity="${.35 * k}"/>` }
+};
+const PRESETS = [['Rose garden', 'maroon', 'roses'], ['Lavender', 'mauve', 'blossoms'], ['Night sky', 'midnight', 'stars'], ['Woodland', 'forest', 'leaves']];
+const designURL = (design, v, k = 1) => { const d = DESIGNS[design]; if (!d) return ''; const s = `<svg xmlns="http://www.w3.org/2000/svg" width="${d.size}" height="${d.size}">${d.svg({ fl: v.acc2, leaf: v.t3 }, k)}</svg>`; return `url('data:image/svg+xml,${encodeURIComponent(s)}')`; }; // single quotes: it also goes inside style="…" attributes
+const look = () => S?.settings.look || {};
+function applyTheme() {
+  const a = look(), v = themeVars(a.theme), root = document.documentElement;
+  THEME_KEYS.forEach(k => root.style.setProperty('--' + k, v[k]));
+  const bg = designURL(a.design, v, a.strength ?? 1);
+  document.body.style.backgroundImage = bg; document.body.style.backgroundSize = bg ? `${DESIGNS[a.design].size}px` : '';
+  document.body.classList.toggle('patterned', !!bg);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', v.s0);
+  if (document.querySelector('.math')) renderAllMath(); // answers use the theme's highlight colour
+  try { localStorage.setItem('ln-look', JSON.stringify({ v, bg, size: document.body.style.backgroundSize })); } catch { }
+}
+const miniPreview = (v, design, k) => `<span class="tprev" style="background:${v.s1};border-color:${v.s4}"><span class="tp-rail" style="background-color:${v.s0};background-image:${designURL(design, v, k) || 'none'};background-size:${design ? DESIGNS[design].size / 2.2 + 'px' : 'auto'}"><i style="background:${v.acc}"></i><b style="background:${v.t5}"></b><b style="background:${v.t5}"></b></span><span class="tp-main"><b style="background:${v.tx};width:60%"></b><b style="background:${v.mut}"></b><b style="background:${v.mut};width:70%"></b><i style="background:${v.acc2}"></i></span></span>`;
+function appearanceHTML() {
+  const a = look(), cur = themeVars(a.theme), k = a.strength ?? 1;
+  return `<section class="box" data-ch="appearance" id="lookSet"><h3>Colour theme</h3><div class="tgrid">${Object.entries(THEMES).map(([id, t]) => `<button class="tcard${(a.theme || 'graphite') === id ? ' on' : ''}" data-theme="${id}">${miniPreview(themeVars(id), a.design, k)}<b>${t.name}</b><small>${t.sub}</small></button>`).join('')}</div>
+    <h3 style="margin-top:22px">Background design</h3><p class="mut" style="margin-top:0">Shown around the edges and softly behind your pages, in your theme's colours.</p>
+    <div class="tgrid">${[['', 'None'], ...Object.entries(DESIGNS).map(([id, d]) => [id, d.name])].map(([id, n]) => `<button class="tcard${(a.design || '') === id ? ' on' : ''}" data-design="${id}">${miniPreview(cur, id, k)}<b>${n}</b></button>`).join('')}</div>
+    <label class="row" style="margin-top:14px"><span>Design strength</span><input type="range" id="lookK" min="0.4" max="1.8" step="0.1" value="${k}" style="flex:1;max-width:260px"${a.design ? '' : ' disabled'}></label>
+    <h3 style="margin-top:22px">Presets</h3><div class="row">${PRESETS.map(([n, t, d]) => `<button data-preset="${t}:${d}">${n}</button>`).join('')}<button data-preset="graphite:">Classic</button></div></section>`;
+}
+function bindAppearance() {
+  const box = $('#lookSet'); if (!box) return;
+  const set = o => { S.settings.look = { ...look(), ...o }; save(); applyTheme(); const st = main.scrollTop; viewSettings('appearance'); main.scrollTop = st; };
+  box.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.theme) set({ theme: b.dataset.theme });
+    else if ('design' in b.dataset) set({ design: b.dataset.design });
+    else if (b.dataset.preset) { const [theme, design] = b.dataset.preset.split(':'); set({ theme, design }); }
+  };
+  $('#lookK').oninput = e => { S.settings.look = { ...look(), strength: +e.target.value }; save(); applyTheme(); };
+  $('#lookK').onchange = () => { const st = main.scrollTop; viewSettings('appearance'); main.scrollTop = st; };
+}
+const SET_CH = [['general', 'General', 'settings'], ['appearance', 'Appearance', 'sparkle'], ['home', 'Home', 'home'], ['calendar', 'Calendar', 'calendar'], ['pen', 'Pen & ink', 'pen'], ['calc', 'Calculator & math', 'calc'], ['ai', 'AI assistant', 'bulb'], ['sync', 'Sync', 'sync']];
+
+/* ---------- settings ---------- */
+function viewSettings(section) {
+  const L = homeLayout();
+  main.innerHTML = `<div class="page setpage"><h1>Settings</h1><div class="setwrap"><nav class="setnav">${SET_CH.map(([k, t, ic]) => `<a href="#/settings/${k}" data-ch="${k}">${icon(ic, 17)}<span>${t}</span></a>`).join('')}</nav><div class="setbody">${appearanceHTML()}${calcSettingsHTML()}
+    <section class="box" data-ch="home" id="widgets"><div class="wh"><h3>Home widgets</h3><button id="wreset">Reset layout</button></div>
+      <p class="mut" style="margin-top:0">Choose what shows on Home, which column it goes in and how much room it takes. On Home you can also drag widgets by their ⠿ grip and collapse them with the arrow.</p>
+      <table class="wtab">${Object.entries(WIDGETS).map(([id, w]) => `<tr data-id="${id}"><td><label><input type="checkbox" data-k="on"${L.hidden[id] ? '' : ' checked'} style="accent-color:var(--acc)"> ${w.name}</label></td>
+        <td style="width:120px"><select data-k="col"><option value="0"${L.cols[0].includes(id) ? ' selected' : ''}>Left</option><option value="1"${L.cols[1].includes(id) ? ' selected' : ''}>Right</option></select></td>
+        <td style="width:150px"><select data-k="size">${[['fit', 'Fit content'], ['compact', 'Compact'], ['tall', 'Tall']].map(([v, t]) => `<option value="${v}"${(L.size[id] || 'fit') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></td></tr>`).join('')}</table></section>
+    <section class="box" data-ch="calendar"><h3>Calendars (Google Calendar, Outlook, iCloud…)</h3>
+      <p class="mut" style="margin-top:0">Read-only sync through a private iCal link, refreshed every 30 minutes. In Google Calendar on the web: <b>Settings</b> → pick your calendar under “Settings for my calendars” → <b>Integrate calendar</b> → copy <b>Secret address in iCal format</b>.</p>
+      <div id="calList">${S.settings.cals.map(c => `<div class="calrow"><span class="cdot" style="background:${c.color}"></span><b style="flex:1">${esc(c.name)}</b><small style="${c.err ? 'color:#ff7b7b' : ''}">${c.err ? 'Error: ' + esc(c.err) : c.synced ? `${(S.ics[c.id] || []).length} events · synced ${ago(c.synced)}` : 'not synced yet'}</small><button data-rm="${c.id}">Remove</button></div>`).join('')}</div>
+      <p style="margin:14px 0 0"><b>Add a calendar</b> <span class="mut">— add as many as you like (personal, university, work, holidays…)</span></p>
+      ${NATIVE ? '' : `<p class="webnote" style="margin-top:10px">In the web / iPad version only calendar servers that allow web apps can be read — Google Calendar, iCloud and Outlook links don't, so sync those in the desktop app for Windows.</p>`}
+      <form id="calAdd" class="row" style="margin-top:6px"><input name="name" placeholder="Name, e.g. University" style="width:170px" required><input name="url" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" style="flex:1" required><input type="color" name="color" value="#4285f4" style="width:40px;padding:2px"><button class="pri">Add</button>${S.settings.cals.length ? `<button type="button" id="calSync">${icon('sync', 16)} Sync now</button>` : ''}</form></section>
+    <section class="box" data-ch="pen" id="penSet"><h3>Pen &amp; handwriting</h3>
+      ${NATIVE ? `<label class="row" style="margin-bottom:8px"><input type="checkbox" data-k="handwriting"${hwOn() ? ' checked' : ''}> <span><b>Handwriting to text</b> <span class="mut">— shows the Aa button in pages, sticky notes, files and the whiteboard. Uses the recognizer built into Windows, offline.</span></span></label>`
+        : `<p class="webnote" style="margin-bottom:8px"><b>Handwriting to text</b> (the Aa button) uses Windows and is only in the desktop app. On iPad, use <b>Scribble</b> instead: switch the page to “⌨ Type only” and write with Apple Pencil in the page or any text box — iPadOS turns it into typed text.</p>`}
+      <label class="row"><input type="checkbox" data-k="inkShapes"${inkState.shapes ? ' checked' : ''}> <span><b>Ink to shape</b> <span class="mut">— large rough circles, lines, boxes and triangles snap clean (Ctrl+Shift+S).</span></span></label></section>
+    <section class="box" data-ch="calc" id="mathSet"><h3>Math answers</h3>
+      <label class="row" style="margin-bottom:8px"><input type="checkbox" data-k="mathEq"${S.settings.mathEq === false ? '' : ' checked'}> <span><b>In equations</b> <span class="mut">— end an equation (Alt+=) with “=” and its answer appears after it, e.g. \\frac{3}{4}+2^3 = 35/4.</span></span></label>
+      <label class="row"><input type="checkbox" data-k="mathText"${S.settings.mathText === false ? '' : ' checked'}> <span><b>In notebook pages</b> <span class="mut">— type “12*4 + 7 =” and the answer appears in grey; Tab, Enter or a tap keeps it. A line like “price = 12” sets a value you can use below. Angles follow the calculator's DEG / RAD setting.</span></span></label></section>
+    <section class="box" data-ch="ai"><h3>AI Assistant (DeepSeek)</h3>${NATIVE ? `<p class="mut" style="margin-top:0">Optional. The key is stored only on this computer and is sent only to api.deepseek.com when you use the assistant.</p>
+      <div class="row"><input id="key" type="password" placeholder="sk-…" style="flex:1" value="${esc(S.settings.aiKey)}"><select id="model">${['deepseek-chat', 'deepseek-reasoner'].map(m => `<option${m === S.settings.aiModel ? ' selected' : ''}>${m}</option>`).join('')}</select><button class="pri" id="saveKey">Save</button></div>` : DESKTOP_ONLY('The AI assistant')}</section>
+    ${syncSettingsHTML()}${ttsSettingsHTML()}<section class="box" data-ch="general"><h3>About</h3><p class="mut" style="margin-top:0"><span id="ver">LocalNotes</span> · Found a bug? <b>Report a problem</b> copies technical details (version, Windows, screen size, how many pages and files you have, recent errors — never your notes, keys or calendar links). Paste them into your message.</p>
+      <div class="row"><button id="report">${icon('alert', 16)} Report a problem</button></div></section>
+    <section class="box" data-ch="general"><h3>Backup</h3><p class="mut" style="margin-top:0">All data lives inside the app on this computer. Export a backup now and then (Markdown files are included; PDFs stay inside the app — export them from Files).</p>
+      <div class="row"><button id="exp">Export backup (.json)</button><label class="btn">Import backup…<input type="file" id="imp" accept=".json" hidden></label></div></section></div></div></div>`;
+  const ch = SET_CH.some(c => c[0] === section) ? section : section === 'widgets' ? 'home' : S.settings.setCh || 'general'; S.settings.setCh = ch;
+  main.querySelectorAll('[data-ch]').forEach(x => x.tagName === 'A' ? x.classList.toggle('on', x.dataset.ch === ch) : x.hidden = x.dataset.ch !== ch);
+  bindAppearance(); bindCalcSettings();
+  $('#widgets').onchange = e => {
+    const id = e.target.closest('tr')?.dataset.id, k = e.target.dataset.k; if (!id) return;
+    if (k === 'on') L.hidden[id] = !e.target.checked;
+    if (k === 'size') L.size[id] = e.target.value;
+    if (k === 'col') { L.cols.forEach(c => { const i = c.indexOf(id); if (i >= 0) c.splice(i, 1); }); L.cols[+e.target.value].push(id); }
+    save();
+  };
+  $('#wreset').onclick = () => { if (confirm('Reset Home to the default widget layout?')) { S.settings.home = null; homeLayout(); save(); route(); } };
+  $('#calAdd').onsubmit = e => {
+    e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+    S.settings.cals.push({ id: uid(), name: f.name.trim(), url: f.url.trim(), color: f.color }); save(); route(); syncCals();
+  };
+  $('#calList').onclick = e => { const id = e.target.dataset.rm; if (id && confirm('Remove this calendar?')) { S.settings.cals = S.settings.cals.filter(c => c.id !== id); delete S.ics[id]; save(); route(); } };
+  if ($('#calSync')) $('#calSync').onclick = () => { $('#calSync').textContent = 'Syncing…'; syncCals(); };
+  $('#mathSet').onchange = e => { S.settings[e.target.dataset.k] = e.target.checked; save(); };
+  $('#penSet').onchange = e => { const k = e.target.dataset.k; if (k === 'inkShapes') { if (inkState.shapes !== e.target.checked) toggleShapes(); } else if (k) { S.settings[k] = e.target.checked; save(); } };
+  if (NATIVE) $('#saveKey').onclick = () => { S.settings.aiKey = $('#key').value.trim(); S.settings.aiModel = $('#model').value; save(); $('#saveKey').textContent = 'Saved ✓'; };
+  const info = () => NATIVE ? window.native.info() : Promise.resolve({ version: 'web', web: true, os: navigator.userAgent });
+  info().then(i => $('#ver').textContent = i.web ? 'LocalNotes (web version)' : `LocalNotes ${i.version}${i.portable ? ' (portable)' : ''}`);
+  $('#report').onclick = async () => {
+    const i = await info(), n = t => S.files.filter(f => f.type === t).length;
+    await navigator.clipboard.writeText([i.web ? 'LocalNotes web version' : `LocalNotes ${i.version}${i.portable ? ' (portable)' : ''}`, ...(i.web ? [] : [`Electron ${i.electron} / Chromium ${i.chrome}`]), i.os,
+      `Screen ${screen.width}×${screen.height} @${devicePixelRatio}x, window ${innerWidth}×${innerHeight}`,
+      `${S.notebooks.length} notebooks, ${S.sections.length} sections, ${S.notes.length} pages, ${S.files.length} files (${n('pdf')} pdf, ${n('md')} md, ${n('pptx')} pptx), ${S.boards.length} whiteboards, ${S.tasks.length} tasks, ${S.events.length} events, ${S.settings.cals.length} calendars`,
+      `Recent errors (${ERRS.length}):`, ...(ERRS.length ? ERRS : ['none'])].join('\n'));
+    toast('Details copied — paste them into your message');
+  };
+  bindSyncSettings(); bindTtsSettings();
+  $('#exp').onclick = async () => dl(new Blob([JSON.stringify(await sealState())], { type: 'application/json' }), `localnotes-backup-${today()}.json`); // protected sections stay encrypted in backups
+  $('#imp').onchange = async e => {
+    try {
+      const data = JSON.parse(await e.target.files[0].text());
+      if (!Array.isArray(data.notes) || !Array.isArray(data.notebooks)) throw new Error('Not a LocalNotes backup');
+      if (!confirm('Replace ALL current data with this backup?')) return;
+      cleanBackup(data);
+      const keepBlobs = S.files.filter(f => f.type !== 'md'); // PDFs and slides aren't in backups, they stay in the app
+      forgetSyncBase(); secKeys.clear(); // the keys belong to the old pages: kept, the next save would re-encrypt the sealed imported ones as blanks
+      S = { ...seed(), ...data, sections: data.sections || [], migratedSections: data.migratedSections };
+      S.settings.cals ||= [];
+      if (!S.migratedSections) migrateSections();
+      inkState.shapes = S.settings.inkShapes ?? true;
+      S.files = [...(data.files || []), ...keepBlobs.filter(p => !(data.files || []).some(f => f.id === p.id))];
+      applyTheme(); flush(); route();
+    } catch (err) { alert('Import failed: ' + err.message); }
+  };
+}
+
+/* ---------- keyboard shortcuts (Windows) ---------- */
+const SHORTCUTS = [
+  ['Calculator', [['Ctrl+Shift+C', 'Open / close the calculator'], ['Enter', 'Calculate'], ['↑ / ↓', 'Earlier calculations'], ['5+3→A', 'Store in a memory (A–F, M, X, Y)'], ['∫(X², 0, 1)', 'Integral · also d/dx(…, x) and Σ(…, a, b)'], ['5 [cm▸in]  /  [c0]', 'Unit conversion / constant (search box in the calculator)']]],
+  ['General', [['Ctrl+N', 'New page'], ['Ctrl+Alt+N', 'New page below the current one'], ['Ctrl+T', 'New section'], ['Ctrl+Shift+N', 'New notebook'], ['Ctrl+F  /  Ctrl+E', 'Search everything'], ['Ctrl+P', 'Jump to a page'], ['Ctrl+J', 'AI assistant'], ['Ctrl+\\', 'Collapse / expand sidebar'], ['Ctrl+,', 'Settings'], ['F1  /  Ctrl+/', 'This shortcuts panel'], ['Ctrl+S', 'Save (everything saves automatically)'], ['Esc', 'Close panels and menus']]],
+  ['Go to', [['Alt+1', 'Home'], ['Alt+2', 'Notes'], ['Alt+3', 'Tasks'], ['Alt+4', 'Files'], ['Alt+5', 'Calendar'], ['Alt+6', 'Whiteboards']]],
+  ['Writing', [['Ctrl+B / I / U', 'Bold / italic / underline'], ['Ctrl+Alt+1 / 2 / 3', 'Heading 1 / 2 / 3'], ['Ctrl+Alt+0', 'Normal text'], ['Ctrl+.', 'Bulleted list'], ['Ctrl+/', 'Numbered list (in a page)'], ['Ctrl+K', 'Insert link'], ['Ctrl+click', 'Open link'], ['Alt+Shift+D / T / F', 'Insert date / time / both']]],
+  ['Math', [['Alt+=', 'Insert equation (block on an empty line)'], ['12*4 + 7 =', 'In a page: the answer shows in grey — Tab / Enter keeps it'], ['… =', 'An equation ending in = shows its answer'], ['$ … $', 'Inline math as you type'], ['$$ … $$', 'Block math as you type'], ['Click a formula', 'Edit it']]],
+  ['Tags', [['Ctrl+1', 'To Do'], ['Ctrl+2', 'Important'], ['Ctrl+3', 'Question'], ['Ctrl+4', 'Remember for later'], ['Ctrl+5', 'Definition'], ['Ctrl+6', 'Critical'], ['Ctrl+0', 'Remove tag']]],
+  ['Pages & sections', [['Ctrl+Alt+]', 'Make subpage'], ['Ctrl+Alt+[', 'Promote subpage'], ['Drag page', 'Reorder, or drop on a section to move'], ['Right-click', 'More page / section options'], ['Double-click section', 'Rename']]],
+  ['Pages extras', [['Ctrl+Alt+H', 'Highlight (yellow) — more colours in the toolbar'], ['Right-click', 'Format bar + spelling suggestions where you are'], ['Click a picture', 'Resize, draw on it, delete'], ['Ctrl+V / drop', 'Paste or drop a picture'], ['Ctrl+=  /  Ctrl+−  /  Ctrl+0', 'Zoom the app in / out / reset (Ctrl+scroll too)']]],
+  ['Pen & ink', [['Ctrl+Z  /  Ctrl+Y', 'Undo / redo ink (right after drawing)'], ['Ctrl+Shift+D', 'Switch: type only → stylus draws → draw with anything (fingers too; ☝ on whiteboards)'], ['Ctrl+Shift+S', 'Ink to shape on / off (on by default)'], ['Ctrl+Shift+E', 'Pen ↔ eraser'], ['Scribble over ink', 'Scratch-out erase'], ['Pen eraser end', 'Erase'], ['Right-drag (whiteboard)', 'Erase']]],
+  ['Whiteboard', [['Ctrl + drag', 'Pan around the canvas'], ['Space + drag  /  middle-drag', 'Pan'], ['Scroll  /  Shift+scroll', 'Move up-down / sideways'], ['Ctrl+scroll', 'Zoom at the cursor'], ['Ctrl+=  /  Ctrl+−  /  Ctrl+0', 'Zoom in / out / 100%'], ['Ctrl+1', 'Fit everything'], ['V / P / H / E', 'Select / pen / highlighter / eraser'], ['T / N', 'Text / sticky note'], ['Ctrl+A / D / C / V', 'Select all / duplicate / copy / paste'], ['Delete', 'Delete selection'], ['Ctrl+Z  /  Ctrl+Y', 'Undo / redo'], ['Double-click', 'Edit a note or text'], ['Ctrl+V  /  drag in', 'Paste or drop an image']]]
+];
+const kbdHTML = q => SHORTCUTS.map(([g, rows]) => { const r = rows.filter(([k, d]) => !q || (k + ' ' + d).toLowerCase().includes(q)); return r.length ? `<h4>${g}</h4>${r.map(([k, d]) => `<div class="kb"><span>${esc(d)}</span><span>${k.split('  /  ').map(x => `<kbd>${esc(x)}</kbd>`).join(' ')}</span></div>`).join('')}` : ''; }).join('') || '<p class="mut">No match.</p>';
+const toggleKbd = open => { const k = $('#kbd'); k.hidden = open === undefined ? !k.hidden : !open; if (!k.hidden) { $('#kbdBody').innerHTML = kbdHTML(''); $('#kbdQ').value = ''; $('#kbdQ').focus(); } };
+$('#kbdTab').onclick = () => toggleKbd(); $('#kbdClose').onclick = () => toggleKbd(false);
+addEventListener('pointerdown', e => { if (!$('#kbd').hidden && !e.target.closest('#kbd,#kbdTab')) toggleKbd(false); }); // a click / tap outside closes it
+$('#kbdQ').oninput = e => $('#kbdBody').innerHTML = kbdHTML(e.target.value.toLowerCase());
+function toast(msg) { document.querySelector('.toast:not(.upd)')?.remove(); const t = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg }); document.body.append(t); setTimeout(() => t.remove(), 1800); }
+const focusSearch = () => openSearch();
+document.addEventListener('keydown', e => {
+  if (e.defaultPrevented) return;
+  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), digit = /^Digit([1-6])$/.exec(e.code)?.[1];
+  const go = f => { e.preventDefault(); f(); };
+  if (e.key === 'F1' || (mod && !e.shiftKey && e.key === '/')) return go(() => toggleKbd());
+  if (e.key === 'Escape') { $('#gs')?.remove(); document.querySelector('.ctx')?.remove(); toggleKbd(false); $('#ai').hidden = true; if (!$('#calc').hidden) toggleCalc(false); return; }
+  if (mod && e.shiftKey && e.code === 'KeyC') return go(() => toggleCalc());
+  if (e.altKey && !mod && digit) return go(() => location.hash = '#/' + ['home', 'notes', 'tasks', 'files', 'calendar', 'boards'][digit - 1]);
+  if (!mod) return;
+  // Ctrl+Z / Ctrl+Y undo ink when you drew last (typing keeps normal text undo)
+  if (!e.altKey && (e.code === 'KeyZ' || e.code === 'KeyY') && lastInkG?.bar?.isConnected && (lastInkAt > lastTypeAt || !e.target.closest?.('[contenteditable=true],input,textarea')))
+    return go(() => (e.code === 'KeyY' || e.shiftKey) ? inkRedo(lastInkG) : inkUndo(lastInkG));
+  if (!e.shiftKey && !e.altKey && (e.key === '=' || e.key === '+')) return go(() => appZoom(1));
+  if (!e.shiftKey && !e.altKey && e.key === '-') return go(() => appZoom(-1));
+  if (!e.shiftKey && !e.altKey && e.key === '0') return go(() => appZoom(0));
+  if (e.altKey && e.code === 'KeyN') return go(() => newNote(curSection, { after: currentNote }));
+  if (e.shiftKey && e.code === 'KeyN') return go(newNotebook);
+  if (!e.altKey && e.code === 'KeyN') return go(() => newNote(curSection));
+  if (!e.shiftKey && e.code === 'KeyT') return go(() => { const nb = S.notebooks.find(n => n.id === secOf(curSection)?.notebookId) || S.notebooks[0]; nb ? newSection(nb) : newNotebook(); });
+  if (!e.shiftKey && !e.altKey && ['KeyF', 'KeyE', 'KeyP'].includes(e.code)) return go(focusSearch);
+  if (e.code === 'KeyJ') return go(() => $('#aiBtn').click());
+  if (e.key === '\\') return go(toggleSide);
+  if (e.key === ',') return go(() => location.hash = '#/settings');
+  if (e.shiftKey && e.code === 'KeyD') return go(() => { inkState.mode = { type: 'pen', pen: 'draw', draw: 'type' }[inkState.mode]; refreshInkUI(); toast({ type: '⌨ Type only', pen: '✒ Stylus draws', draw: '✒ Draw with any input' }[inkState.mode]); });
+  if (e.shiftKey && e.code === 'KeyS') return go(() => { toggleShapes(); refreshInkUI(); toast(`Ink to shape ${inkState.shapes ? 'on' : 'off'}`); });
+  if (e.shiftKey && e.code === 'KeyE') return go(() => { inkState.tool = pen.tool = inkState.tool === 'eraser' ? 'pen' : 'eraser'; refreshInkUI(); toast(inkState.tool === 'eraser' ? 'Eraser' : 'Pen'); });
+  if (e.code === 'KeyS') return go(() => toast('Everything saves automatically ✓'));
+});
+
+/* ---------- calculator: fx-style scientific (expressions, equations, stats, tables) ---------- */
+const CS = () => S.settings.calc ||= { ang: 'deg', vars: {}, hist: [], ans: 0, tab: 'calc', eq: { t: 'quad', v: {} }, stat: '', tbl: { fs: [{ s: 'X²' }], a: '-5', b: '5', s: '1' } };
+const CalcErr = (m = 'Syntax ERROR') => Object.assign(new Error(m), { calc: true });
+const CFUNCS = ['asinh', 'acosh', 'atanh', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'sqrt', 'cbrt', 'abs', 'exp', 'log', 'ln', 'nCr', 'nPr', 'ddx', 'int', 'sum'];
+// the fx's 40 scientific constants (CODATA 2018) and 40 metric conversions (NIST SP 811), written [name] and [from▸to] in expressions
+const CCONST = [['mp', 'proton mass', 1.67262192369e-27, 'kg'], ['mn', 'neutron mass', 1.67492749804e-27, 'kg'], ['me', 'electron mass', 9.1093837015e-31, 'kg'], ['mμ', 'muon mass', 1.883531627e-28, 'kg'],
+  ['a0', 'Bohr radius', 5.29177210903e-11, 'm'], ['h', 'Planck constant', 6.62607015e-34, 'J s'], ['μN', 'nuclear magneton', 5.0507837461e-27, 'J/T'], ['μB', 'Bohr magneton', 9.2740100783e-24, 'J/T'],
+  ['ħ', 'Planck constant, rationalized', 1.054571817e-34, 'J s'], ['α', 'fine-structure constant', 7.2973525693e-3, ''], ['re', 'classical electron radius', 2.8179403262e-15, 'm'], ['λC', 'Compton wavelength', 2.42631023867e-12, 'm'],
+  ['γp', 'proton gyromagnetic ratio', 2.6752218744e8, '1/(s T)'], ['λCp', 'proton Compton wavelength', 1.32140985539e-15, 'm'], ['λCn', 'neutron Compton wavelength', 1.31959090581e-15, 'm'], ['R∞', 'Rydberg constant', 10973731.56816, '1/m'],
+  ['u', 'atomic mass unit', 1.6605390666e-27, 'kg'], ['μp', 'proton magnetic moment', 1.41060679736e-26, 'J/T'], ['μe', 'electron magnetic moment', -9.2847647043e-24, 'J/T'], ['μn', 'neutron magnetic moment', -9.6623651e-27, 'J/T'],
+  ['μμ', 'muon magnetic moment', -4.4904483e-26, 'J/T'], ['F', 'Faraday constant', 96485.33212, 'C/mol'], ['e', 'elementary charge', 1.602176634e-19, 'C'], ['NA', 'Avogadro constant', 6.02214076e23, '1/mol'],
+  ['k', 'Boltzmann constant', 1.380649e-23, 'J/K'], ['Vm', 'molar volume of ideal gas (273.15 K, 100 kPa)', 22.71095464e-3, 'm³/mol'], ['R', 'molar gas constant', 8.314462618, 'J/(mol K)'], ['c0', 'speed of light in vacuum', 299792458, 'm/s'],
+  ['c1', 'first radiation constant', 3.741771852e-16, 'W m²'], ['c2', 'second radiation constant', 1.438776877e-2, 'm K'], ['σ', 'Stefan–Boltzmann constant', 5.670374419e-8, 'W/(m² K⁴)'], ['ε0', 'electric constant', 8.8541878128e-12, 'F/m'],
+  ['μ0', 'magnetic constant', 1.25663706212e-6, 'N/A²'], ['Φ0', 'magnetic flux quantum', 2.067833848e-15, 'Wb'], ['g', 'standard acceleration of gravity', 9.80665, 'm/s²'], ['G0', 'conductance quantum', 7.748091729e-5, 'S'],
+  ['Z0', 'characteristic impedance of vacuum', 376.730313668, 'Ω'], ['t', 'Celsius temperature (0 °C)', 273.15, 'K'], ['G', 'Newtonian constant of gravitation', 6.6743e-11, 'm³/(kg s²)'], ['atm', 'standard atmosphere', 101325, 'Pa']];
+const CCONV = [];
+[['in', 'cm', 2.54], ['ft', 'm', .3048], ['yd', 'm', .9144], ['mile', 'km', 1.609344], ['nmile', 'm', 1852], ['acre', 'm²', 4046.8564224], ['gal(US)', 'ℓ', 3.785411784], ['gal(UK)', 'ℓ', 4.54609],
+  ['pc', 'km', 3.0856775814913673e13], ['km/h', 'm/s', 1 / 3.6], ['oz', 'g', 28.349523125], ['lb', 'kg', .45359237], ['atm', 'Pa', 101325], ['mmHg', 'Pa', 133.322387415], ['hp', 'kW', .745699872],
+  ['kgf/cm²', 'Pa', 98066.5], ['kgf·m', 'J', 9.80665], ['lbf/in²', 'kPa', 6.894757293168], ['°F', '°C'], ['J', 'cal', 1 / 4.1855]]
+  .forEach(([a, b, k]) => CCONV.push(...(k ? [[`${a}▸${b}`, v => v * k], [`${b}▸${a}`, v => v / k]] : [[`${a}▸${b}`, v => (v - 32) * 5 / 9], [`${b}▸${a}`, v => v * 9 / 5 + 32]])));
+const CUNIT = { in: 'inch inches', cm: 'centimetre centimeter', ft: 'foot feet', m: 'metre meter', yd: 'yard yards', mile: 'mile miles', km: 'kilometre kilometer', nmile: 'nautical-mile nautical mile', acre: 'acre area', 'm²': 'm² square metre meter area m2',
+  'gal(US)': 'gallon us volume', 'gal(UK)': 'gallon uk imperial volume', 'ℓ': 'litre liter l volume', pc: 'parsecs parsec astronomy', 'km/h': 'km/h kmh kph speed', 'm/s': 'm/s speed', oz: 'ounce ounces weight mass', g: 'gram grams weight mass',
+  lb: 'pound pounds lbs weight mass', kg: 'kilogram kilo weight mass', atm: 'atmosphere pressure', Pa: 'pascal pressure', mmHg: 'mmHg millimetre mercury torr pressure', hp: 'horsepower power', kW: 'kilowatt power',
+  'kgf/cm²': 'kgf/cm² kilogram force pressure', 'kgf·m': 'kgf·m kilogram force metre energy torque', J: 'joule energy', 'lbf/in²': 'psi pound force pressure', kPa: 'kilopascal pressure', '°F': 'fahrenheit temperature', '°C': 'celsius centigrade temperature', cal: 'calorie energy' };
+let CPICK; const cpickList = () => CPICK ||= [...CCONST.map(([s, n, v, u], i) => ({ label: s, ins: `[${s}]`, desc: `${n} · ${calcFmt(v)}${u ? ' ' + u : ''}`, find: `const constant ${i + 1} ${s} ${n} ${u}`.toLowerCase() })),
+  ...CCONV.map(([n], i) => { const [a, b] = n.split('▸'); return { label: n.replace('▸', ' ▸ '), ins: `[${n}]`, desc: `convert ${CUNIT[a]?.split(' ')[0] || a} to ${CUNIT[b]?.split(' ')[0] || b} — put it after a number`, find: `conv convert ${i + 1} ${n} ${a} ${b} to ${CUNIT[a] || ''} ${CUNIT[b] || ''}`.toLowerCase() }; })];
+function calcTokens(src, names) { // names: { word: value } defined on the page (price = 12)
+  const nk = names ? Object.keys(names).sort((a, b) => b.length - a.length) : [];
+  const s = src.replace(/d\/dx/g, 'ddx').replace(/->/g, '→').replace(/∫/g, 'int').replace(/Σ/g, 'sum').replace(/\s+/g, ''), t = [];
+  for (let i = 0; i < s.length;) {
+    const rest = s.slice(i), c = s[i], num = /^(\d+\.?\d*|\.\d+)/.exec(rest), fn = CFUNCS.find(n => rest.startsWith(n)), nm = nk.find(n => rest.startsWith(n) && (n.length === 1 || !/\w/.test(rest[n.length] || '')));
+    if (c === '[') { // [c0] constant or [cm▸in] conversion
+      const j = s.indexOf(']', i), name = j < 0 ? '' : s.slice(i + 1, j), k = CCONST.find(x => x[0] === name), cv = CCONV.find(x => x[0].replace(/\s/g, '') === name);
+      if (k) t.push({ k: 'num', v: k[2] }); else if (cv) t.push({ k: 'op', v: 'conv', f: cv[1] }); else throw CalcErr();
+      i = j + 1;
+    }
+    else if (num) { t.push({ k: 'num', v: parseFloat(num[1]) }); i += num[1].length; }
+    else if (nm) { t.push({ k: 'num', v: names[nm] }); i += nm.length; }
+    else if (rest.startsWith('⁻¹')) { t.push({ k: 'op', v: 'inv' }); i += 2; }
+    else if (fn) { t.push({ k: 'fn', v: fn }); i += fn.length; }
+    else if (rest.startsWith('Ans')) { t.push({ k: 'ans' }); i += 3; }
+    else if (c === 'π' || c === 'e') { t.push({ k: 'num', v: c === 'π' ? Math.PI : Math.E }); i++; }
+    else if (/[A-FMXY]/.test(c)) { t.push({ k: 'var', v: c }); i++; }
+    else if ('+-−×*·÷/^(),!²³%→√∛'.includes(c)) { t.push({ k: 'op', v: { '−': '-', '*': '×', '·': '×', '/': '÷' }[c] || c }); i++; }
+    else throw CalcErr();
+  }
+  return t;
+}
+const cAng = () => CS().ang, toRad = v => cAng() === 'deg' ? v * Math.PI / 180 : cAng() === 'gra' ? v * Math.PI / 200 : v, fromRad = v => cAng() === 'deg' ? v * 180 / Math.PI : cAng() === 'gra' ? v * 200 / Math.PI : v;
+const cFact = n => { if (n < 0 || n !== Math.floor(n) || n > 170) return NaN; let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; };
+const cComb = (n, r, perm) => { if ([n, r].some(x => x !== Math.floor(x)) || r < 0 || n < r) return NaN; let v = 1; for (let i = 0; i < r; i++) v = perm ? v * (n - i) : v * (n - i) / (i + 1); return Math.round(v); };
+function cIntegrate(F, a, b) { // adaptive Simpson
+  const simp = (a, b, fa, fm, fb) => (b - a) / 6 * (fa + 4 * fm + fb);
+  const rec = (a, b, fa, fm, fb, whole, eps, d) => {
+    const m = (a + b) / 2, flm = F((a + m) / 2), frm = F((m + b) / 2), L = simp(a, m, fa, flm, fm), R = simp(m, b, fm, frm, fb);
+    return d <= 0 || Math.abs(L + R - whole) <= 15 * eps ? L + R + (L + R - whole) / 15 : rec(a, m, fa, flm, fm, L, eps / 2, d - 1) + rec(m, b, fm, frm, fb, R, eps / 2, d - 1);
+  };
+  const fa = F(a), fb = F(b), fm = F((a + b) / 2); return rec(a, b, fa, fm, fb, simp(a, b, fa, fm, fb), 1e-11, 18);
+}
+function cCall(n, a) { // a: argument closures; env.X overrides the X memory inside ∫, d/dx, Σ
+  const [f, g, h] = a, need = k => { if (a.length !== k) throw CalcErr(); }, one = fn => (need(1), e => fn(f(e)));
+  const trig = fn => one(v => { const r = fn(toRad(v)); return Math.abs(r) > 1e15 ? NaN : Math.abs(r) < 1e-14 ? 0 : r; });
+  const at = (e, x) => f({ ...e, X: x });
+  switch (n) {
+    case 'sin': return trig(Math.sin); case 'cos': return trig(Math.cos); case 'tan': return trig(Math.tan);
+    case 'asin': return one(v => fromRad(Math.asin(v))); case 'acos': return one(v => fromRad(Math.acos(v))); case 'atan': return one(v => fromRad(Math.atan(v)));
+    case 'sinh': return one(Math.sinh); case 'cosh': return one(Math.cosh); case 'tanh': return one(Math.tanh);
+    case 'asinh': return one(Math.asinh); case 'acosh': return one(Math.acosh); case 'atanh': return one(Math.atanh);
+    case 'sqrt': return one(Math.sqrt); case 'cbrt': return one(Math.cbrt); case 'abs': return one(Math.abs); case 'exp': return one(Math.exp); case 'ln': return one(Math.log);
+    case 'log': return a.length === 2 ? e => Math.log(g(e)) / Math.log(f(e)) : one(Math.log10); // log(base, x) like the fx
+    case 'nCr': need(2); return e => cComb(f(e), g(e), false);
+    case 'nPr': need(2); return e => cComb(f(e), g(e), true);
+    case 'ddx': need(2); return e => { const x = g(e), d = k => (at(e, x + k) - at(e, x - k)) / (2 * k), k = 1e-3 * Math.max(1, Math.abs(x)); return (4 * d(k / 2) - d(k)) / 3; };
+    case 'int': need(3); return e => cIntegrate(x => at(e, x), g(e), h(e));
+    case 'sum': need(3); return e => { const lo = g(e), hi = h(e); if (lo !== Math.floor(lo) || hi !== Math.floor(hi) || hi - lo > 1e6) return NaN; let s = 0; for (let x = lo; x <= hi; x++) s += at(e, x); return s; };
+  }
+  throw CalcErr();
+}
+function calcParse(src, names) { // -> env => number   (env: { vars, ans, X? })
+  const t = calcTokens(src, names); let p = 0;
+  const is = v => t[p]?.k === 'op' && t[p].v === v, eat = v => is(v) && ++p;
+  const close = () => { if (!eat(')') && p < t.length) throw CalcErr(); }; // a missing ")" at the very end is fine, like on the fx
+  const starts = x => x && (x.k !== 'op' || '(√∛'.includes(x.v));
+  const expr = () => { const f = sum(); if (!eat('→')) return f; const v = t[p++]; if (v?.k !== 'var') throw CalcErr(); return e => (e.vars[v.v] = f(e)); };
+  const sum = () => { let a = prod(); for (;;) { const x = a; if (eat('+')) { const y = prod(); a = e => x(e) + y(e); } else if (eat('-')) { const y = prod(); a = e => x(e) - y(e); } else return a; } };
+  const prod = () => { let a = unary(); for (;;) { const x = a; if (eat('×')) { const y = unary(); a = e => x(e) * y(e); } else if (eat('÷')) { const y = unary(); a = e => x(e) / y(e); } else if (starts(t[p])) { const y = power(); a = e => x(e) * y(e); } else return a; } }; // 2π, 3(4), 2sin30
+  const unary = () => eat('-') ? (f => e => -f(e))(unary()) : eat('+') ? unary() : power();
+  const power = () => { const b = post(); if (!eat('^')) return b; const x = unary(); return e => b(e) ** x(e); };
+  const post = () => { let a = prim(); for (;;) { const x = a; if (eat('!')) a = e => cFact(x(e)); else if (eat('²')) a = e => x(e) ** 2; else if (eat('³')) a = e => x(e) ** 3; else if (eat('inv')) a = e => 1 / x(e); else if (eat('%')) a = e => x(e) / 100; else if (is('conv')) { const cv = t[p++].f; a = e => cv(x(e)); } else return a; } };
+  const group = () => { const f = expr(); close(); return f; };
+  const fnArg = () => { let a = power(); while (starts(t[p]) && t[p].k !== 'fn') { const x = a, y = power(); a = e => x(e) * y(e); } return a; }; // sin2π is sin(2π) like the fx; sin30cos30 stays two functions
+  const prim = () => {
+    const x = t[p++]; if (!x) throw CalcErr();
+    if (x.k === 'num') return () => x.v;
+    if (x.k === 'ans') return e => e.ans;
+    if (x.k === 'var') return e => x.v === 'X' && e.X != null ? e.X : e.vars[x.v] ?? 0;
+    if (x.v === '(') return group();
+    if (x.v === '√' || x.v === '∛') { const f = eat('(') ? group() : post(); return x.v === '√' ? e => Math.sqrt(f(e)) : e => Math.cbrt(f(e)); }
+    if (x.k === 'fn') { if (!eat('(')) return cCall(x.v, [fnArg()]); const l = [expr()]; while (eat(',')) l.push(expr()); close(); return cCall(x.v, l); }
+    throw CalcErr();
+  };
+  const f = expr(); if (p < t.length) throw CalcErr(); return f;
+}
+const calcChk = v => { if (!Number.isFinite(v)) throw CalcErr('Math ERROR'); return v; };
+const calcEval = (src, X) => calcChk(calcParse(String(src))({ vars: CS().vars, ans: CS().ans, X }));
+function calcFmt(v) { // 10 significant digits, like the fx display
+  calcChk(v); if (v === 0) return '0';
+  const D = CS().digits || 10, a = Math.abs(v); if (a >= 10 ** D || a < 1e-3) { const [m, x] = v.toExponential(D - 1).split('e'); return `${+m}×10^${+x}`; }
+  return String(+v.toPrecision(D));
+}
+function calcFrac(v) { // "p/q" when v is (to 12 digits) a simple fraction
+  if (CS().frac === false || !Number.isFinite(v) || Number.isInteger(v) || Math.abs(v) > 1e9) return null;
+  let h0 = 1, h1 = 0, k0 = 0, k1 = 1, x = v;
+  for (let i = 0; i < 30; i++) {
+    const a = Math.floor(x); [h0, h1] = [a * h0 + h1, h0]; [k0, k1] = [a * k0 + k1, k0];
+    if (k0 > 1e4) return null;
+    if (Math.abs(v - h0 / k0) < 1e-12 * Math.max(1, Math.abs(v))) return k0 === 1 ? null : `${h0}/${k0}`;
+    x = 1 / (x - a); if (!Number.isFinite(x)) return null;
+  }
+  return null;
+}
+const calcShow = v => calcFrac(v) || calcFmt(v);
+const calcCx = (re, im) => Math.abs(im) < 1e-10 * Math.max(1, Math.abs(re)) ? calcShow(re) : `${Math.abs(re) < 1e-12 ? '' : calcShow(re) + (im < 0 ? ' − ' : ' + ')}${calcShow(Math.abs(re) < 1e-12 ? im : Math.abs(im))}i`;
+
+const CKEYS = [
+  ['sin', 'sin('], ['cos', 'cos('], ['tan', 'tan('], ['ln', 'ln('], ['log', 'log(', '', 'log(x) or log(base, x)'], ['√', '√('],
+  ['sin⁻¹', 'asin('], ['cos⁻¹', 'acos('], ['tan⁻¹', 'atan('], ['eˣ', 'e^('], ['10ˣ', '10^('], ['∛', '∛('],
+  ['x²', '²'], ['xʸ', '^'], ['x⁻¹', '⁻¹'], ['x!', '!'], ['π', 'π'], ['e', 'e'],
+  ['∫', '∫(', '', 'Integral: ∫(f(X), a, b)'], ['d/dx', 'd/dx(', '', 'Derivative at a point: d/dx(f(X), x)'], ['Σ', 'Σ(', '', 'Sum: Σ(f(X), a, b)'], ['nCr', 'nCr(', '', 'Combinations: nCr(n, r)'], ['nPr', 'nPr(', '', 'Permutations: nPr(n, r)'], ['X', 'X', '', 'Variable X (also A–F, M, Y)'],
+  ['7', '7', 'n'], ['8', '8', 'n'], ['9', '9', 'n'], ['÷', '÷', 'op'], ['DEL', 'del', 'del'], ['AC', 'ac', 'del'],
+  ['4', '4', 'n'], ['5', '5', 'n'], ['6', '6', 'n'], ['×', '×', 'op'], ['(', '('], [')', ')'],
+  ['1', '1', 'n'], ['2', '2', 'n'], ['3', '3', 'n'], ['−', '-', 'op'], [',', ','], ['→', '→', '', 'Store: 5+3→A'],
+  ['0', '0', 'n'], ['.', '.', 'n'], ['×10ˣ', '×10^('], ['+', '+', 'op'], ['Ans', 'Ans'], ['=', 'eq', 'eq']];
+const coarsePtr = matchMedia('(pointer:coarse)');
+let calcJust = false, calcDec = false, calcHi = -1, calcPos = null;
+function toggleCalc(open) {
+  const el = $('#calc'); el.hidden = open === undefined ? !el.hidden : !open;
+  if (!el.hidden) { drawCalc(); if (!coarsePtr.matches) $('#cin')?.focus(); }
+  renderSide(...sideArgs);
+}
+function drawCalc() {
+  const C = CS(), el = $('#calc'), tabs = [['calc', 'Calculate'], ['eqn', 'Equation'], ['stat', 'Stats'], ['table', 'Table']];
+  el.innerHTML = `<header title="Drag to move"><div class="ctabs">${tabs.map(([k, t]) => `<button data-tab="${k}"${C.tab === k ? ' class="on"' : ''}>${t}</button>`).join('')}</div><button id="calcX" title="Close (Esc)">×</button></header><div class="cpane" id="cpane"></div>`;
+  if (calcPos) Object.assign(el.style, { left: calcPos[0] + 'px', top: calcPos[1] + 'px', right: 'auto' });
+  el.querySelector('.ctabs').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) { C.tab = b.dataset.tab; save(); drawCalc(); } };
+  $('#calcX').onclick = () => toggleCalc(false);
+  const hd = el.querySelector('header'); // drag the panel by its header
+  hd.onpointerdown = e => {
+    if (e.target.closest('button')) return; e.preventDefault(); hd.setPointerCapture(e.pointerId);
+    const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    hd.onpointermove = m => { calcPos = [Math.max(0, Math.min(innerWidth - r.width, m.clientX - dx)), Math.max(0, Math.min(innerHeight - 60, m.clientY - dy))]; Object.assign(el.style, { left: calcPos[0] + 'px', top: calcPos[1] + 'px', right: 'auto' }); };
+    hd.onpointerup = () => hd.onpointermove = hd.onpointerup = null;
+  };
+  ({ eqn: calcEqn, stat: calcStat, table: calcTable }[C.tab] || calcMain)($('#cpane'), C);
+}
+function calcMain(pane, C) {
+  pane.innerHTML = `<div class="cdisp"><input id="cin" spellcheck="false" autocomplete="off" placeholder="e.g. 2sin(30) + √(16)"${coarsePtr.matches ? ' inputmode="none"' : ''}><div class="cres" id="cres"></div><button id="csd" class="calt" hidden></button></div>
+    <div class="cmeta"><div class="seg" id="cang">${[['deg', 'DEG'], ['rad', 'RAD'], ['gra', 'GRA']].map(([k, t]) => `<button data-a="${k}"${C.ang === k ? ' class="on"' : ''} title="Angles in ${{ deg: 'degrees', rad: 'radians', gra: 'grads' }[k]}">${t}</button>`).join('')}</div><span style="flex:1"></span><button id="cins" title="Add the last calculation to the open page">${icon('noteplus', 14)} Insert</button></div>
+    <div class="cfindw"><input id="cfind" placeholder="Search constants & conversions — e.g. light, inch, °F" autocomplete="off" spellcheck="false"><div class="cpick" id="cpick" hidden></div></div>
+    ${[[0, 24, 'fk'], [24, 48, 'pad']].map(([a, b, cls]) => `<div class="ckeys ${cls}">${CKEYS.slice(a, b).map(([l, , c, t], j) => `<button data-i="${a + j}"${c ? ` class="${c}"` : ''}${t ? ` title="${t}"` : ''}>${l}</button>`).join('')}</div>`).join('')}
+    <div class="chist" id="chist"></div>`;
+  const cin = $('#cin'), cres = $('#cres'), csd = $('#csd');
+  const forms = (v, src) => { const fr = calcFrac(v), dec = calcFmt(v); return !fr ? [dec] : calcDec !== src.includes('[') ? [dec, fr] : [fr, dec]; }; // [shown big, other form]; constants and conversions read better as decimals
+  const show = (v, err, src = cin.value) => { // the answer, with its other form underneath: click that to swap them
+    const [main, alt] = err || v == null ? [] : forms(v, src);
+    cres.classList.toggle('err', !!err); cres.textContent = err || main || '';
+    csd.hidden = !alt; if (alt) { csd.innerHTML = `<i>⇄</i>${esc(alt)}`; csd.title = `Show ${alt.includes('/') ? 'as a fraction' : 'as a decimal'}`; }
+  };
+  const hist =() => $('#chist').innerHTML = C.hist.map((h, i) => `<div data-h="${i}" title="Use again"><span>${esc(h.i)}</span><span>= ${esc(h.i.includes('[') ? calcFmt(h.v) : calcShow(h.v))}</span></div>`).join('') || '<small style="padding:4px 6px;display:block">Your calculations appear here.</small>';
+  const run = () => {
+    const src = cin.value.trim(); if (!src) return;
+    try { const v = calcEval(src); C.ans = v; C.hist.unshift({ i: src, v }); C.hist.splice(40); calcDec = false; calcJust = true; calcHi = -1; save(); show(v); hist(); }
+    catch (e) { if (!e.calc) console.error(e); show(null, e.calc ? e.message : 'Syntax ERROR'); }
+  };
+  const del = () => {
+    let s = cin.selectionStart, en = cin.selectionEnd;
+    if (s === en) { const m = /(?:(?:a?(?:sin|cos|tan)h?|sqrt|cbrt|abs|exp|log|ln|nCr|nPr|d\/dx)\(|×10\^\(|10\^\(|e\^\(|[√∛∫Σ]\(|Ans|⁻¹|\[[^\]]*\])$/.exec(cin.value.slice(0, s)); s -= m ? m[0].length : 1; if (s < 0) return; }
+    cin.setRangeText('', s, en, 'end');
+  };
+  const press = k => {
+    if (k === 'eq') return run();
+    if (k === 'ac') { cin.value = ''; show(null); calcJust = false; return; }
+    if (calcJust && k !== 'del') { cin.value = /^([-+×÷^²³⁻!%→]|\[[^\]]*▸)/.test(k) ? 'Ans' : ''; cin.setSelectionRange(cin.value.length, cin.value.length); }
+    calcJust = false;
+    if (k === 'del') del(); else cin.setRangeText(k, cin.selectionStart, cin.selectionEnd, 'end');
+    if (!coarsePtr.matches) cin.focus();
+  };
+  pane.querySelectorAll('.ckeys').forEach(keys => {
+    keys.onpointerdown = e => { if (e.target.closest('button')) e.preventDefault(); }; // keep the caret in the input
+    keys.onclick = e => { const b = e.target.closest('button'); if (b) press(CKEYS[b.dataset.i][1]); };
+  });
+  cin.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); return run(); }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); calcHi = Math.max(-1, Math.min(C.hist.length - 1, calcHi + (e.key === 'ArrowUp' ? 1 : -1))); cin.value = calcHi < 0 ? '' : C.hist[calcHi].i; calcJust = false; return; }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+    const k = { '*': '×', '/': '÷' }[e.key]; if (calcJust || k) { e.preventDefault(); press(k || e.key); }
+  };
+  cin.oninput = () => calcJust = false;
+  // searchable CONST / CONV list: pick one to insert it at the caret
+  const find = $('#cfind'), pick = $('#cpick'); let hits = [], sel = 0;
+  const drawPick = () => {
+    const q = find.value.trim().toLowerCase(), words = q.split(/\s+/).filter(Boolean);
+    hits = cpickList().filter(x => words.every(w => x.find.includes(w))).sort((a, b) => !!words[0] && b.label.toLowerCase().startsWith(words[0]) - a.label.toLowerCase().startsWith(words[0])).slice(0, 60); sel = Math.min(sel, Math.max(0, hits.length - 1));
+    pick.innerHTML = hits.map((x, i) => `<div data-p="${i}"${i === sel ? ' class="on"' : ''}><b>${esc(x.label)}</b><span>${esc(x.desc)}</span></div>`).join('') || '<small style="padding:8px;display:block">No match.</small>';
+    pick.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  };
+  const choose = i => { const x = hits[i]; if (!x) return; find.value = ''; pick.hidden = true; press(x.ins); if (coarsePtr.matches) find.blur(); };
+  find.onfocus = () => { pick.hidden = false; drawPick(); };
+  find.oninput = () => { sel = 0; pick.hidden = false; drawPick(); };
+  find.onblur = () => setTimeout(() => pick.hidden = true, 150);
+  find.onkeydown = e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, Math.min(hits.length - 1, sel + (e.key === 'ArrowDown' ? 1 : -1))); drawPick(); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(sel); }
+    else if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); find.value = ''; find.blur(); }
+  };
+  pick.onpointerdown = e => e.preventDefault(); // keep focus while choosing
+  pick.onclick = e => { const d = e.target.closest('[data-p]'); if (d) choose(+d.dataset.p); };
+  $('#cang').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; C.ang = b.dataset.a; save(); pane.querySelectorAll('#cang button').forEach(x => x.classList.toggle('on', x === b)); };
+  csd.onclick = () => { const h = C.hist[0]; if (!h) return; calcDec = !calcDec; show(h.v, null, h.i); };
+  $('#cins').onclick = () => {
+    const h = C.hist[0]; if (!h) return toast('Calculate something first');
+    if (!insertIntoNote) return toast('Open a page to insert into it');
+    insertIntoNote(`${h.i} = ${forms(h.v, h.i)[0]}`); toast('Added to the page');
+  };
+  $('#chist').onclick = e => { const d = e.target.closest('[data-h]'); if (!d) return; const h = C.hist[+d.dataset.h]; cin.value = h.i; calcJust = false; show(h.v); if (!coarsePtr.matches) cin.focus(); };
+  hist(); if (C.hist[0]) { cin.value = C.hist[0].i; calcJust = true; show(C.hist[0].v); }
+}
+const EQNS = { quad: ['aX² + bX + c = 0', ['a', 'b', 'c']], cubic: ['aX³ + bX² + cX + d = 0', ['a', 'b', 'c', 'd']], lin2: ['2 unknowns · aX + bY = c', 2], lin3: ['3 unknowns · aX + bY + cZ = d', 3], solve: ['Solve for X · f(X) = g(X)'] };
+const cRows = lines => lines.map(l => { const i = l.indexOf(' = '); return i < 0 ? `<div class="r"><b style="text-align:left">${esc(l)}</b></div>` : `<div class="r"><span>${esc(l.slice(0, i))}</span><b>${esc(l.slice(i + 3))}</b></div>`; }).join('');
+const cInsert = text => { if (!insertIntoNote) return toast('Open a page to insert into it'); insertIntoNote(text); toast('Added to the page'); };
+const cErr = e => { if (!e.calc) console.error(e); return `<div class="err">${esc(e.calc ? e.message : 'Syntax ERROR')}</div>`; };
+function calcEqn(pane, C) {
+  const Q = C.eq, [title, spec] = EQNS[Q.t], val = k => Q.v[Q.t + k] ?? '';
+  const inp = (k, ph = '0') => `<input data-k="${k}" value="${esc(val(k))}" placeholder="${ph}">`;
+  let body;
+  if (Array.isArray(spec)) body = `<div class="cgrid" style="grid-template-columns:repeat(${spec.length},1fr)">${spec.map(l => `<small>${l}</small>`).join('')}${spec.map(l => inp(l)).join('')}</div>`;
+  else if (spec) { const L = 'abcd'.slice(0, spec + 1).split(''); body = `<div class="cgrid" style="grid-template-columns:repeat(${L.length},1fr)">${L.map(l => `<small>${l}</small>`).join('')}${Array.from({ length: spec }, (_, r) => L.map(l => inp(l + r)).join('')).join('')}</div>`; }
+  else body = `<label class="cf">Equation in X${inp('f', 'e.g. X² = 2   or   cos(X) = X')}</label><label class="cf">Start looking from X =${inp('x0', '1')}</label>`;
+  pane.innerHTML = `<div class="cform"><label class="cf">Type<select id="eqt">${Object.entries(EQNS).map(([k, [t]]) => `<option value="${k}"${k === Q.t ? ' selected' : ''}>${t}</option>`).join('')}</select></label>${body}
+    <small class="mut">Fields take expressions too, e.g. 1/3, √2, π, A.</small><button class="pri" id="eqgo" style="height:38px;justify-content:center;border-radius:10px">Solve</button>
+    <div class="cres2" id="eqout"><div class="hint">Type the coefficients and press Solve.</div></div><div class="cacts"><button id="eqins" disabled>${icon('noteplus', 14)} Insert into page</button></div></div>`;
+  let last = null;
+  $('#eqt').onchange = e => { Q.t = e.target.value; save(); calcEqn(pane, C); };
+  pane.querySelectorAll('[data-k]').forEach(i => { i.oninput = () => { Q.v[Q.t + i.dataset.k] = i.value; save(); }; i.onkeydown = e => { if (e.key === 'Enter') $('#eqgo').click(); }; });
+  $('#eqgo').onclick = () => {
+    const out = $('#eqout'), num = k => { const s = val(k).trim(); return s ? calcEval(s) : 0; };
+    try { last = solveEqn(Q.t, num).split('\n'); out.innerHTML = cRows(last); } catch (e) { last = null; out.innerHTML = cErr(e); }
+    $('#eqins').disabled = !last;
+  };
+  $('#eqins').onclick = () => last && cInsert(`${Q.t === 'solve' ? val('f') : title}: ${last.join(', ')}`);
+}
+function solveEqn(t, num) {
+  if (t === 'quad') {
+    const [a, b, c] = ['a', 'b', 'c'].map(num); if (!a) throw CalcErr('a must not be 0');
+    const D = b * b - 4 * a * c, vx = -b / (2 * a), vy = c - b * b / (4 * a), turn = `\n${a > 0 ? 'Minimum' : 'Maximum'} (X, Y) = (${calcShow(vx)}, ${calcShow(vy)})`;
+    if (Math.abs(D) < 1e-14 * Math.max(1, b * b)) return `X = ${calcShow(vx)}` + turn;
+    if (D > 0) { const q = -(b + Math.sign(b || 1) * Math.sqrt(D)) / 2; return `X₁ = ${calcShow(q / a)}\nX₂ = ${calcShow(c / q)}` + turn; }
+    const im = Math.sqrt(-D) / (2 * Math.abs(a)); return `X₁ = ${calcCx(vx, im)}\nX₂ = ${calcCx(vx, -im)}` + turn;
+  }
+  if (t === 'cubic') {
+    const k = ['a', 'b', 'c', 'd'].map(num); if (!k[0]) throw CalcErr('a must not be 0');
+    const p = k.map(x => x / k[0]); // monic; Durand–Kerner on complex numbers [re, im]
+    const mul = (x, y) => [x[0] * y[0] - x[1] * y[1], x[0] * y[1] + x[1] * y[0]], sub = (x, y) => [x[0] - y[0], x[1] - y[1]];
+    const div = (x, y) => { const d = y[0] * y[0] + y[1] * y[1]; return [(x[0] * y[0] + x[1] * y[1]) / d, (x[1] * y[0] - x[0] * y[1]) / d]; };
+    const P = z => [[1, 0], [p[1], 0], [p[2], 0], [p[3], 0]].reduce((acc, c) => [mul(acc, z)[0] + c[0], mul(acc, z)[1] + c[1]], [0, 0]);
+    let r = [[1, 0], [.4, .9], mul([.4, .9], [.4, .9])];
+    for (let it = 0; it < 500; it++) r = r.map((z, i) => sub(z, div(P(z), r.reduce((q, w, j) => i === j ? q : mul(q, sub(z, w)), [1, 0]))));
+    r = r.map(([re, im]) => { if (Math.abs(im) > 1e-7 * Math.max(1, Math.abs(re))) return [re, im]; let x = re; for (let i = 0; i < 20; i++) { const f = ((x + p[1]) * x + p[2]) * x + p[3], d = (3 * x + 2 * p[1]) * x + p[2]; if (!d) break; x -= f / d; } return [x, 0]; });
+    r.sort((u, v) => Math.abs(u[1]) - Math.abs(v[1]) || v[0] - u[0]);
+    return r.map(([re, im], i) => `X${'₁₂₃'[i]} = ${calcCx(re, im)}`).join('\n');
+  }
+  if (t === 'lin2' || t === 'lin3') {
+    const n = t === 'lin2' ? 2 : 3, L = 'abcd'.slice(0, n + 1).split(''), M = Array.from({ length: n }, (_, r) => L.map(l => num(l + r)));
+    for (let c = 0; c < n; c++) { // Gaussian elimination, partial pivoting
+      const piv = M.slice(c).reduce((b, row, i) => Math.abs(row[c]) > Math.abs(M[b][c]) ? c + i : b, c); [M[c], M[piv]] = [M[piv], M[c]];
+      if (Math.abs(M[c][c]) < 1e-12) throw CalcErr('No unique solution');
+      for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; M[r] = M[r].map((v, j) => v - f * M[c][j]); }
+    }
+    return M.map((row, i) => `${'XYZ'[i]} = ${calcShow(row[n] / row[i])}`).join('\n');
+  }
+  const src = (CS().eq.v.solvef ?? '').trim(); if (!src) throw CalcErr('Type an equation in X');
+  const [l, r = '0'] = src.split('='), fl = calcParse(l), fr = calcParse(r), env = { vars: CS().vars, ans: CS().ans };
+  const F = x => fl({ ...env, X: x }) - fr({ ...env, X: x });
+  let x = num('x0') || 1, ok = false;
+  for (let i = 0; i < 100 && Number.isFinite(x); i++) { const f = F(x), h = 1e-6 * Math.max(1, Math.abs(x)), d = (F(x + h) - F(x - h)) / (2 * h); if (Math.abs(f) < 1e-13) { ok = true; break; } if (!d || !Number.isFinite(d)) break; const nx = x - f / d; if (Math.abs(nx - x) < 1e-14 * Math.max(1, Math.abs(x))) { x = nx; ok = true; break; } x = nx; }
+  if (!ok || !Number.isFinite(x)) { // look outward from the start for a sign change, then bisect
+    const x0 = num('x0') || 1; let lo = null, hi = null;
+    for (let s = .25; s < 2e6 && lo == null; s *= 1.5) for (const [u, v] of [[x0, x0 + s], [x0 - s, x0]]) { const a = F(u), b = F(v); if (Number.isFinite(a) && Number.isFinite(b) && a * b <= 0) { lo = u; hi = v; break; } }
+    if (lo == null) throw CalcErr("Can't solve — try another start value");
+    for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; F(lo) * F(m) <= 0 ? hi = m : lo = m; } x = (lo + hi) / 2;
+  }
+  return `X = ${calcShow(x)}\nL − R = ${calcFmt(F(x))}`;
+}
+function calcStat(pane, C) {
+  pane.innerHTML = `<div class="cform"><label class="cf">Data<textarea id="stin" rows="6" placeholder="One value per line&#10;— or x, y pairs (e.g. 1, 2.5) for regression">${esc(C.stat)}</textarea></label><div class="cres2" id="stout"></div><div class="cacts"><button id="stins">${icon('noteplus', 14)} Insert into page</button></div></div>`;
+  let rows = [];
+  const draw = () => {
+    const out = $('#stout'), lines = C.stat.split('\n').map(l => l.trim()).filter(Boolean); rows = [];
+    if (!lines.length) return out.innerHTML = '<div class="hint">Statistics update as you type.</div>';
+    try {
+      const pts = lines.map(l => l.split(/[,;\t]|\s+(?=[-+.\d])/).map(s => s.trim()).filter(Boolean).map(s => calcEval(s))), pair = pts.every(p => p.length === 2);
+      if (!pair && pts.some(p => p.length !== 1)) throw CalcErr('Use one value per line, or x, y on every line');
+      const xs = pts.map(p => p[0]), ys = pair ? pts.map(p => p[1]) : null, n = xs.length, S1 = a => a.reduce((s, v) => s + v, 0), mean = a => S1(a) / n;
+      const ss = a => { const m = mean(a); return S1(a.map(v => (v - m) ** 2)); }, med = a => { const k = a.length; return k % 2 ? a[(k - 1) / 2] : (a[k / 2 - 1] + a[k / 2]) / 2; };
+      const sorted = [...xs].sort((a, b) => a - b), half = Math.floor(n / 2);
+      const R = [['n', n], ['x̄  mean', mean(xs)], ['Σx', S1(xs)], ['Σx²', S1(xs.map(v => v * v))], ['σx  population', Math.sqrt(ss(xs) / n)], ['sx  sample', n > 1 ? Math.sqrt(ss(xs) / (n - 1)) : NaN],
+        ['min', sorted[0]], ...(n > 1 ? [['Q1', med(sorted.slice(0, half))]] : []), ['median', med(sorted)], ...(n > 1 ? [['Q3', med(sorted.slice(n - half))]] : []), ['max', sorted[n - 1]]];
+      if (pair) {
+        const mx = mean(xs), my = mean(ys), sxy = S1(xs.map((x, i) => (x - mx) * (ys[i] - my))), sxx = ss(xs), syy = ss(ys), b = sxy / sxx;
+        R.push(['ȳ', my], ['Σy', S1(ys)], ['σy', Math.sqrt(syy / n)], ['sy', n > 1 ? Math.sqrt(syy / (n - 1)) : NaN], ['Σxy', S1(xs.map((x, i) => x * ys[i]))], ['y = a + bx  ·  a', my - b * mx], ['b', b], ['r', sxy / Math.sqrt(sxx * syy)]);
+      }
+      rows = R.map(([k, v]) => `${k} = ${Number.isFinite(v) ? calcFmt(v) : '—'}`); out.innerHTML = cRows(rows);
+    } catch (e) { out.innerHTML = cErr(e); }
+  };
+  $('#stin').oninput = e => { C.stat = e.target.value; save(); draw(); };
+  $('#stins').onclick = () => rows.length ? cInsert(rows.map(r => r.replace(/\s{2,}/g, ' ')).join('\n')) : toast('Type some data first');
+  draw();
+}
+// ---- grapher: up to 4 functions of X, sliders for A–F, pan / zoom / trace, key points (roots, min/max, crossings)
+const GNAMES = ['f', 'g', 'h', 'p'];
+const gStyle = kind => { const v = getComputedStyle(document.documentElement), c = n => v.getPropertyValue('--' + n).trim();
+  return kind === 'light' ? { bg: '#ffffff', grid: '#e7e7e7', axis: '#8a8a8a', text: '#666666', cols: [c('acc'), '#d9822b', '#2f6fd6', '#b0479c'] }
+    : { bg: kind === 'page' ? c('s1') : c('s0'), grid: c('s3'), axis: c('t5'), text: c('mut'), cols: [c('acc2'), '#f0b35a', '#6fb7ff', '#e58ad6'] }; };
+const gParams = T => [...new Set(T.fs.flatMap(o => { try { return calcTokens(o.s).filter(t => t.k === 'var' && t.v !== 'X').map(t => t.v); } catch { return []; } }))].sort();
+function graphModel(T, C) { // parsed functions, parameters and the visible range
+  const vars = { ...C.vars }; for (const n of gParams(T)) vars[n] = T.pv[n] ?? C.vars[n] ?? 1; // slider values
+  const fns = T.fs.map((o, i) => ({ ...o, n: GNAMES[i], i })).filter(o => o.s.trim() && !o.off).map(o => ({ ...o, f: calcParse(o.s) }));
+  if (!fns.length) throw CalcErr('Type f(X) to draw it');
+  const a = calcEval(T.a), b = calcEval(T.b); if (!(b > a)) throw CalcErr('Use an X min smaller than X max');
+  const lo = String(T.ymin ?? '').trim() ? calcEval(T.ymin) : null, hi = String(T.ymax ?? '').trim() ? calcEval(T.ymax) : null;
+  if (lo != null && hi != null && !(hi > lo)) throw CalcErr('Use a Y min smaller than Y max');
+  const env = x => ({ vars, ans: C.ans, X: x });
+  fns.forEach(o => o.at = x => { try { const y = o.f(env(x)); return Number.isFinite(y) ? y : NaN; } catch { return NaN; } });
+  return { fns, a, b, lo, hi };
+}
+function keyPoints(M, xs, span) { // roots, turning points, y-intercepts and crossings, refined numerically
+  const out = [], near = (x, k) => out.some(p => p.k === k && Math.abs(p.x - x) < (M.b - M.a) * 1e-6);
+  const bis = (F, u, v) => { let fu = F(u); for (let i = 0; i < 64; i++) { const w = (u + v) / 2, fw = F(w); if (!Number.isFinite(fw)) return null; if (fu * fw <= 0) v = w; else { u = w; fu = fw; } } return (u + v) / 2; };
+  const gold = (F, u, v, max) => { const r = (Math.sqrt(5) - 1) / 2; let c = v - r * (v - u), d = u + r * (v - u); for (let i = 0; i < 70; i++) { if ((F(c) > F(d)) === max) v = d; else u = c; c = v - r * (v - u); d = u + r * (v - u); } return (u + v) / 2; };
+  const zeros = (F, ys, add) => { for (let i = 1; i < xs.length; i++) { const y0 = ys[i - 1], y1 = ys[i]; if (!Number.isFinite(y0) || !Number.isFinite(y1) || Math.abs(y1 - y0) > span) continue; if (y0 === 0) add(xs[i - 1]); else if (y0 * y1 < 0) { const x = bis(F, xs[i - 1], xs[i]); if (x != null && Math.abs(F(x)) < 1e-6 * Math.max(1, span)) add(x); } } };
+  for (const o of M.fns) {
+    zeros(o.at, o.ys, x => !near(x, 'root' + o.n) && out.push({ k: 'root' + o.n, t: 'root', o, x, y: 0 }));
+    for (let i = 1; i < xs.length - 1; i++) {
+      const d0 = o.ys[i] - o.ys[i - 1], d1 = o.ys[i + 1] - o.ys[i];
+      if (!Number.isFinite(d0) || !Number.isFinite(d1) || d0 * d1 >= 0 || Math.abs(d0) + Math.abs(d1) > span * .5) continue;
+      const max = d0 > 0, x = gold(o.at, xs[i - 1], xs[i + 1], max), y = o.at(x);
+      if (Number.isFinite(y) && !near(x, 'ext' + o.n)) out.push({ k: 'ext' + o.n, t: max ? 'max' : 'min', o, x, y });
+    }
+    if (M.a <= 0 && M.b >= 0) { const y = o.at(0); if (Number.isFinite(y)) out.push({ k: 'yint' + o.n, t: 'y-intercept', o, x: 0, y }); }
+  }
+  M.fns.forEach((o, i) => M.fns.slice(i + 1).forEach(q => { const F = x => o.at(x) - q.at(x); zeros(F, o.ys.map((y, j) => y - q.ys[j]), x => !near(x, 'x' + o.n + q.n) && out.push({ k: 'x' + o.n + q.n, t: `${o.n} = ${q.n}`, o, q, x, y: o.at(x) })); }));
+  return out.slice(0, 60);
+}
+// draws the graph; returns the geometry so the panel can pan, zoom and trace. st: colours (+ legend, points, trace)
+function plotGraph(cv, M, st) {
+  const W = cv.width, H = cv.height, g = cv.getContext('2d'), k = cv._k || 1, F = getComputedStyle(document.documentElement).getPropertyValue('--numf');
+  const N = Math.min(900, Math.max(300, Math.round(W / k))), xs = Array.from({ length: N + 1 }, (_, i) => M.a + (M.b - M.a) * i / N);
+  M.fns.forEach(o => { o.ys = xs.map(o.at); o.col = st.cols[o.i]; });
+  let { lo, hi } = M;
+  if (lo == null || hi == null) { // automatic Y: the whole curve unless it shoots off (asymptotes)
+    const all = M.fns.flatMap(o => o.ys).filter(Number.isFinite).sort((p, q) => p - q); if (!all.length) throw CalcErr('Nothing to draw in this range');
+    let l = all[Math.floor(all.length * .02)], h = all[Math.ceil(all.length * .98) - 1];
+    if (all.at(-1) - all[0] <= 4 * Math.max(h - l, 1e-9)) [l, h] = [all[0], all.at(-1)];
+    if (h - l < 1e-9) { l -= 1; h += 1; } const pad = (h - l) * .08;
+    lo ??= l - pad; hi ??= h + pad; if (!(hi > lo)) hi = lo + 1;
+  }
+  const m = { l: 48 * k, r: 14 * k, t: 14 * k, b: 28 * k }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const X = x => m.l + (x - M.a) / (M.b - M.a) * pw, Y = y => H - m.b - (y - lo) / (hi - lo) * ph, ix = px => M.a + (px - m.l) / pw * (M.b - M.a), iy = py => lo + (H - m.b - py) / ph * (hi - lo);
+  const ticks = (p, q, n) => { const s0 = (q - p) / n, mg = 10 ** Math.floor(Math.log10(s0)), s = [1, 2, 5, 10].map(v => v * mg).find(v => v >= s0), out = []; for (let v = Math.ceil(p / s) * s; v <= q + s * 1e-9; v += s) out.push(+v.toPrecision(12)); return out; };
+  const lab = v => Math.abs(v) >= 1e5 || (v && Math.abs(v) < 1e-3) ? v.toExponential(1) : String(+v.toPrecision(6));
+  const ln = (x0, y0, x1, y1) => { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); };
+  g.fillStyle = st.bg; g.fillRect(0, 0, W, H); g.lineWidth = k; g.font = `${11 * k}px ${F}`; g.textBaseline = 'middle';
+  for (const x of ticks(M.a, M.b, Math.max(3, Math.round(pw / (70 * k))))) { g.strokeStyle = st.grid; ln(X(x), m.t, X(x), H - m.b); g.fillStyle = st.text; g.textAlign = 'center'; g.fillText(lab(x), X(x), H - m.b + 14 * k); }
+  for (const y of ticks(lo, hi, Math.max(3, Math.round(ph / (55 * k))))) { g.strokeStyle = st.grid; ln(m.l, Y(y), W - m.r, Y(y)); g.fillStyle = st.text; g.textAlign = 'right'; g.fillText(lab(y), m.l - 7 * k, Y(y)); }
+  g.strokeStyle = st.axis; g.lineWidth = 1.3 * k;
+  if (M.a <= 0 && M.b >= 0) ln(X(0), m.t, X(0), H - m.b);
+  if (lo <= 0 && hi >= 0) ln(m.l, Y(0), W - m.r, Y(0));
+  g.save(); g.beginPath(); g.rect(m.l, m.t, pw, ph); g.clip(); g.lineWidth = 2.4 * k; g.lineJoin = g.lineCap = 'round';
+  const span = hi - lo;
+  for (const o of M.fns) {
+    g.strokeStyle = o.col; g.beginPath(); let on = false, py = 0;
+    o.ys.forEach((y, i) => { if (!Number.isFinite(y) || y < lo - 3 * span || y > hi + 3 * span) { on = false; return; } if (on && Math.abs(y - py) > span * 1.2) on = false; on ? g.lineTo(X(xs[i]), Y(y)) : g.moveTo(X(xs[i]), Y(y)); on = true; py = y; });
+    g.stroke();
+  }
+  const pts = st.points ? keyPoints(M, xs, span) : [];
+  for (const p of pts) { g.beginPath(); g.arc(X(p.x), Y(p.y), 4.2 * k, 0, 7); g.fillStyle = p.q ? st.text : st.bg; g.fill(); g.lineWidth = 2 * k; g.strokeStyle = p.o.col; g.stroke(); }
+  if (st.trace) { // crosshair + (x, y) label
+    const { x, y, col } = st.trace, sx = X(x), sy = Y(y), txt = `(${lab(x)}, ${lab(y)})`;
+    g.setLineDash([4 * k, 4 * k]); g.strokeStyle = st.axis; g.lineWidth = k; ln(sx, m.t, sx, H - m.b); g.setLineDash([]);
+    g.beginPath(); g.arc(sx, sy, 5.5 * k, 0, 7); g.fillStyle = col; g.fill(); g.lineWidth = 2 * k; g.strokeStyle = st.bg; g.stroke();
+    g.font = `600 ${12 * k}px ${F}`; const tw = g.measureText(txt).width + 14 * k, tx = Math.min(sx + 10 * k, W - m.r - tw), ty = Math.max(m.t + 12 * k, sy - 18 * k);
+    g.fillStyle = st.bg; g.globalAlpha = .9; g.fillRect(tx, ty - 11 * k, tw, 22 * k); g.globalAlpha = 1; g.fillStyle = col; g.textAlign = 'left'; g.fillText(txt, tx + 7 * k, ty);
+  }
+  g.restore();
+  if (st.legend) { g.font = `${12 * k}px ${F}`; g.textAlign = 'left'; M.fns.forEach((o, i) => { const y = m.t + 12 * k + i * 18 * k; g.fillStyle = o.col; g.fillRect(m.l + 10 * k, y - 1.5 * k, 16 * k, 3 * k); g.fillStyle = st.text; g.fillText(`${o.n}(X) = ${o.s}`, m.l + 32 * k, y); }); }
+  return { X, Y, ix, iy, lo, hi, m, pw, ph, pts };
+}
+function calcTable(pane, C) {
+  const T = C.tbl; T.view ||= 'table'; T.pv ||= {}; T.pr ||= {};
+  if (!T.fs) { T.fs = [T.f, T.g].filter(s => s?.trim()).map(s => ({ s })); if (!T.fs.length) T.fs = [{ s: 'X²' }]; } // older single f / g
+  if (T.a === '1' && T.b === '5' && !T.moved) { T.a = '-5'; T.b = '5'; }
+  const el = $('#calc'); el.classList.toggle('wide', !!C.wide);
+  const params = gParams(T);
+  const fnRows = T.fs.map((o, i) => `<div class="gfn"><button class="gdot${o.off ? ' off' : ''}" data-tog="${i}" title="Show / hide" style="--c:${gStyle('panel').cols[i]}"></button><b>${GNAMES[i]}(X) =</b><input data-f="${i}" value="${esc(o.s)}" placeholder="${['e.g. X² − 2X', 'e.g. sin(X)', 'e.g. A·X + B', 'e.g. 1/X'][i]}">${T.fs.length > 1 ? `<button class="gx" data-rm="${i}" title="Remove">×</button>` : ''}</div>`).join('');
+  const sliders = params.map(n => { const r = T.pr[n] || { min: -10, max: 10 }, v = T.pv[n] ?? C.vars[n] ?? 1; return `<div class="gsl"><b>${n}</b><small>${r.min}</small><input type="range" data-p="${n}" min="${r.min}" max="${r.max}" step="${(r.max - r.min) / 400}" value="${v}"><small>${r.max}</small><input class="gpv" data-pv="${n}" value="${+(+v).toPrecision(6)}"></div>`; }).join('');
+  pane.innerHTML = `<div class="cform">${fnRows}${T.fs.length < 4 ? '<button class="gadd" id="gadd">＋ Add function</button>' : ''}
+    ${sliders ? `<div class="gsls"><small class="mut">Sliders — letters A–F, M and Y in the functions</small>${sliders}</div>` : ''}
+    <div class="seg" id="tview" style="height:32px">${[['table', 'Table'], ['graph', 'Graph']].map(([v, t]) => `<button data-v="${v}" style="flex:1"${T.view === v ? ' class="on"' : ''}>${t}</button>`).join('')}</div>
+    <div class="cgrid" style="grid-template-columns:repeat(${T.view === 'graph' ? 4 : 3},1fr)">${(T.view === 'graph' ? [['a', 'X min'], ['b', 'X max'], ['ymin', 'Y min'], ['ymax', 'Y max']] : [['a', 'Start'], ['b', 'End'], ['s', 'Step']]).map(([, l]) => `<small>${l}</small>`).join('')}${(T.view === 'graph' ? ['a', 'b', 'ymin', 'ymax'] : ['a', 'b', 's']).map(k => `<input data-k="${k}" value="${esc(T[k] ?? '')}"${k.startsWith('y') ? ' placeholder="auto"' : ''}>`).join('')}</div>
+    <div id="tbout"></div></div>`;
+  const toURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+  const fmt = v => String(+v.toPrecision(5));
+  let geo = null, M = null, trace = null, cv = null;
+  const paint = () => { // redraw only the canvas (pan, zoom, trace, sliders)
+    try { M = graphModel(T, C); geo = plotGraph(cv, M, { ...gStyle('panel'), points: true, trace }); $('#gerr').textContent = ''; listPoints(); }
+    catch (e) { if (!e.calc) console.error(e); $('#gerr').textContent = e.calc ? e.message : 'Syntax ERROR'; }
+  };
+  const listPoints = () => {
+    const L = $('#gpts'); if (!L) return; const lab = v => calcFmt(Math.abs(v) < 1e-12 ? 0 : v);
+    L.innerHTML = geo.pts.length ? geo.pts.map((p, i) => `<div data-pt="${i}"><i style="background:${p.o.col}"></i><span>${p.q ? `${p.o.n} and ${p.q.n} cross` : `${p.o.n}: ${p.t}`}</span><b>(${lab(p.x)}, ${lab(p.y)})</b></div>`).join('') : '<small class="mut">No roots, turning points or crossings in view.</small>';
+  };
+  const setView = (a, b, lo, hi) => { T.a = fmt(a); T.b = fmt(b); if (lo != null) { T.ymin = fmt(lo); T.ymax = fmt(hi); } T.moved = true; pane.querySelectorAll('[data-k]').forEach(i => { if (document.activeElement !== i) i.value = T[i.dataset.k] ?? ''; }); clearTimeout(T._t); T._t = setTimeout(save, 400); paint(); };
+  const zoom = (f, px, py) => { if (!geo) return; const x0 = geo.ix(px ?? geo.m.l + geo.pw / 2), y0 = geo.iy(py ?? geo.m.t + geo.ph / 2); setView(x0 - (x0 - M.a) * f, x0 + (M.b - x0) * f, y0 - (y0 - geo.lo) * f, y0 + (geo.hi - y0) * f); };
+  const traceAt = (px, py) => { // nearest curve at this x, snapping to key points
+    if (!geo) return; const snap = geo.pts.find(p => Math.hypot(geo.X(p.x) - px, geo.Y(p.y) - py) < 12 * cv._k); if (snap) { trace = { x: snap.x, y: snap.y, col: snap.o.col }; return paint(); }
+    const x = geo.ix(px); let best = null; for (const o of M.fns) { const y = o.at(x); if (!Number.isFinite(y)) continue; const d = Math.abs(geo.Y(y) - py); if (!best || d < best.d) best = { d, x, y, col: o.col }; }
+    trace = best; paint();
+  };
+  const draw = () => {
+    const out = $('#tbout');
+    if (T.view === 'graph') {
+      out.innerHTML = `<div class="gwrap"><canvas class="cgraph" id="cgv"></canvas><div class="gzoom"><button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">−</button><button data-z="reset" title="Reset view (−10…10, automatic Y)">${icon('fit', 14)}</button><button data-z="wide" title="${C.wide ? 'Narrower panel' : 'Wider panel'}">${C.wide ? '⇥' : '⇤'}</button></div></div><div class="cres2 gerr" id="gerr"></div>
+        <div class="gpts" id="gpts"></div><div class="cacts"><button id="gins">${icon('noteplus', 14)} Insert into page</button><button id="gcopy">Copy image</button><button id="gsave">${icon('download', 14)} Save PNG</button></div>
+        <small class="mut">Drag to move · scroll or pinch to zoom · hover or tap a curve to trace it</small>`;
+      cv = $('#cgv'); const k = devicePixelRatio || 1; cv._k = k; cv.width = Math.round(cv.clientWidth * k); cv.height = Math.round(cv.clientWidth * (C.wide ? 10 : 11) / 16 * k);
+      paint();
+      const pts = new Map(); let drag = null, moved = false;
+      const loc = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * k, (e.clientY - r.top) * k]; };
+      cv.onpointerdown = e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, loc(e)); moved = false; if (geo && pts.size === 1) drag = { p: loc(e), a: M.a, b: M.b, lo: geo.lo, hi: geo.hi }; if (pts.size === 2) { const [p, q] = [...pts.values()]; drag = { pinch: Math.hypot(p[0] - q[0], p[1] - q[1]) }; } };
+      cv.onpointermove = e => {
+        const p = loc(e);
+        if (!pts.has(e.pointerId)) { if (e.pointerType === 'mouse') traceAt(...p); return; }
+        pts.set(e.pointerId, p);
+        if (drag?.pinch && pts.size === 2) { const [u, v] = [...pts.values()], d = Math.hypot(u[0] - v[0], u[1] - v[1]); zoom(drag.pinch / d, (u[0] + v[0]) / 2, (u[1] + v[1]) / 2); drag.pinch = d; moved = true; return; }
+        if (!drag || drag.pinch) return; const dx = p[0] - drag.p[0], dy = p[1] - drag.p[1]; if (Math.abs(dx) + Math.abs(dy) > 4 * k) moved = true; if (!moved) return;
+        const sx = (drag.b - drag.a) / geo.pw, sy = (drag.hi - drag.lo) / geo.ph; trace = null; setView(drag.a - dx * sx, drag.b - dx * sx, drag.lo + dy * sy, drag.hi + dy * sy);
+      };
+      cv.onpointerup = cv.onpointercancel = e => { const p = loc(e); pts.delete(e.pointerId); if (!pts.size) { if (!moved && e.type === 'pointerup') traceAt(...p); drag = null; } };
+      cv.onpointerleave = e => { if (e.pointerType === 'mouse' && !pts.size && trace) { trace = null; paint(); } };
+      cv.onwheel = e => { e.preventDefault(); zoom(Math.exp(e.deltaY * .0015), ...loc(e)); };
+      out.querySelector('.gzoom').onclick = e => {
+        const z = e.target.closest('[data-z]')?.dataset.z; if (!z) return;
+        if (z === 'in') zoom(1 / 1.5); else if (z === 'out') zoom(1.5);
+        else if (z === 'reset') { T.ymin = T.ymax = ''; trace = null; setView(-10, 10); }
+        else { C.wide = !C.wide; save(); calcTable(pane, C); }
+      };
+      $('#gpts').onclick = e => { const d = e.target.closest('[data-pt]'); if (!d || !geo) return; const p = geo.pts[+d.dataset.pt]; trace = { x: p.x, y: p.y, col: p.o.col }; paint(); };
+      const image = kind => new Promise(res => { const c = document.createElement('canvas'); c._k = 2; c.width = 1280; c.height = 800; plotGraph(c, graphModel(T, C), { ...gStyle(kind), legend: true, points: true }); c.toBlob(res, 'image/png'); });
+      const pageKind = () => !currentNote || (currentNote.pcolor || 'dark') === 'dark' ? 'page' : 'light'; // match a dark or a light page
+      $('#gins').onclick = async () => { if (!insertImageIntoNote) return toast('Open a page to insert into it'); try { insertImageIntoNote(await toURL(await image(pageKind())), `Graph of ${T.fs.map((o, i) => `${GNAMES[i]}(X) = ${o.s}`).join(', ')}`); toast('Graph added to the page'); } catch { toast('Fix the functions first'); } };
+      $('#gcopy').onclick = async () => { try { const b = await image('light'); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Graph copied'); } catch { toast("Couldn't copy — use Save PNG"); } };
+      $('#gsave').onclick = async () => { try { dl(await image('light'), 'graph.png'); } catch { toast('Fix the functions first'); } };
+      return;
+    }
+    try {
+      const Mt = graphModel({ ...T, ymin: '', ymax: '' }, C), s = calcEval(T.s ?? '1');
+      if (s <= 0) throw CalcErr('Use a positive Step');
+      const n = Math.floor((Mt.b - Mt.a) / s + 1e-9) + 1; if (n > 200) throw CalcErr('Too many rows — use a bigger step (max 200)');
+      out.innerHTML = `<div class="cres2" style="padding:4px 10px"><table class="ctab"><tr><th>X</th>${Mt.fns.map(o => `<th>${o.n}(X)</th>`).join('')}</tr>${Array.from({ length: n }, (_, i) => { const x = +(Mt.a + i * s).toPrecision(12); return `<tr><td>${esc(calcFmt(x))}</td>${Mt.fns.map(o => { const y = o.at(x); return `<td>${Number.isFinite(y) ? esc(calcShow(y)) : 'ERROR'}</td>`; }).join('')}</tr>`; }).join('')}</table></div>`;
+    } catch (e) { out.innerHTML = `<div class="cres2">${cErr(e)}</div>`; }
+  };
+  const rerender = () => { save(); calcTable(pane, C); };
+  pane.querySelectorAll('[data-f]').forEach(i => i.oninput = () => { T.fs[+i.dataset.f].s = i.value; save(); if (gParams(T).join() !== params.join()) { const pos = i.selectionStart; rerender(); const n = pane.querySelector(`[data-f="${i.dataset.f}"]`); n.focus(); n.setSelectionRange(pos, pos); } else T.view === 'graph' ? paint() : draw(); });
+  pane.querySelectorAll('[data-k]').forEach(i => i.oninput = () => { T[i.dataset.k] = i.value; T.moved = true; save(); T.view === 'graph' ? paint() : draw(); });
+  pane.querySelectorAll('[data-p]').forEach(r => r.oninput = () => { T.pv[r.dataset.p] = +r.value; pane.querySelector(`[data-pv="${r.dataset.p}"]`).value = +(+r.value).toPrecision(6); clearTimeout(T._t); T._t = setTimeout(save, 400); T.view === 'graph' ? paint() : draw(); });
+  pane.querySelectorAll('[data-pv]').forEach(i => i.onchange = () => { const n = i.dataset.pv; let v; try { v = calcEval(i.value); } catch { return; } T.pv[n] = v; const r = T.pr[n] ||= { min: -10, max: 10 }; if (v < r.min) r.min = Math.floor(v); if (v > r.max) r.max = Math.ceil(v); rerender(); });
+  pane.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => { const o = T.fs[+b.dataset.tog]; o.off = !o.off; rerender(); });
+  pane.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { T.fs.splice(+b.dataset.rm, 1); rerender(); });
+  if ($('#gadd')) $('#gadd').onclick = () => { T.fs.push({ s: '' }); rerender(); pane.querySelector(`[data-f="${T.fs.length - 1}"]`)?.focus(); };
+  $('#tview').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; T.view = b.dataset.v; rerender(); };
+  draw();
+}
+const MAN = (t, body) => `<details class="man"><summary>${t}</summary><div>${body}</div></details>`, KX = s => `<code>${esc(s)}</code>`;
+function calcSettingsHTML() {
+  const C = CS();
+  return `<section class="box" data-ch="calc" id="calcSet"><h3>Calculator</h3>
+    <div class="srow"><span><b>Angles</b><small>Used by sin, cos, tan and their inverses, in the calculator and in math answers.</small></span><div class="seg" id="csAng">${[['deg', 'Degrees'], ['rad', 'Radians'], ['gra', 'Grads']].map(([k, t]) => `<button data-a="${k}"${C.ang === k ? ' class="on"' : ''}>${t}</button>`).join('')}</div></div>
+    <div class="srow"><span><b>Exact fractions</b><small>Show answers like 1÷3 as ${KX('1/3')}, with the decimal underneath; click it to swap.</small></span><label class="switch"><input type="checkbox" id="csFrac"${C.frac === false ? '' : ' checked'}><i></i></label></div>
+    <div class="srow"><span><b>Digits</b><small>Significant digits in decimal answers (the fx shows 10).</small></span><select id="csDig">${[6, 8, 10, 12, 15].map(d => `<option${(C.digits || 10) === d ? ' selected' : ''}>${d}</option>`).join('')}</select></div>
+    <div class="srow"><span><b>Clean up</b><small>${C.hist.length} calculations in the history · ${Object.keys(C.vars).length} memories in use</small></span><div class="row"><button id="csHist">Clear history</button><button id="csMem">Clear memories</button></div></div>
+    <div class="row" style="margin-top:12px"><button class="pri" id="csOpen">${icon('calc', 16)} Open the calculator</button><small class="mut">or press Ctrl+Shift+C anywhere</small></div></section>
+  <section class="box" data-ch="calc"><h3>How to use the calculator</h3>
+    ${MAN('Getting started', `<p>Open it from <b>Calculator</b> in the sidebar or with <b>Ctrl+Shift+C</b>. Drag the panel by its top bar to move it; Esc closes it. Type with the keyboard or tap the keys, then press <b>=</b> or Enter.</p><p>After an answer, typing a number starts a new calculation and typing an operator (+ − × ÷ ^ …) continues from the answer, like a real calculator. <b>↑ / ↓</b> brings back earlier calculations, and you can click any line in the history to reuse it.</p>`)}
+    ${MAN('Writing expressions', `<table class="mtab"><tr><td>${KX('2+3×4')}, ${KX('2(3+4)')}, ${KX('2π')}</td><td>Normal order of operations; multiplication signs can be left out</td></tr><tr><td>${KX('2^10')}, ${KX('3²')}, ${KX('2⁻¹')}</td><td>Powers, square, reciprocal</td></tr><tr><td>${KX('√(16)')}, ${KX('∛(27)')}</td><td>Square and cube roots</td></tr><tr><td>${KX('sin(30)')}, ${KX('asin(0.5)')}, ${KX('sinh(1)')}</td><td>Trig (in the chosen angle unit), inverses, hyperbolic</td></tr><tr><td>${KX('ln(e)')}, ${KX('log(100)')}, ${KX('log(2, 8)')}</td><td>Natural log, log base 10, log with any base</td></tr><tr><td>${KX('5!')}, ${KX('nCr(5, 2)')}, ${KX('nPr(5, 2)')}</td><td>Factorial, combinations, permutations</td></tr><tr><td>${KX('50%')}, ${KX('abs(-3)')}, ${KX('6.02×10^(23)')}</td><td>Percent, absolute value, scientific notation</td></tr></table><p>A missing ")" at the very end is fine. <b>Syntax ERROR</b> means the expression can't be read; <b>Math ERROR</b> means it has no real answer (÷0, √ of a negative, tan 90°…).</p>`)}
+    ${MAN('Fractions, Ans and memories', `<p>Exact answers show as fractions (${KX('1÷3 = 1/3')}), with the decimal underneath; click it to swap them. <b>Ans</b> is the last answer.</p><p>Store a value in a memory with →: ${KX('5+3→A')}. Memories <b>A–F, M, X, Y</b> keep their values until you change them (Settings can clear them): ${KX('A×2')} gives 16.</p>`)}
+    ${MAN('Integrals, derivatives and sums', `<table class="mtab"><tr><td>${KX('∫(X², 0, 1)')}</td><td>Integral of f(X) from a to b → 1/3</td></tr><tr><td>${KX('d/dx(X³, 2)')}</td><td>Slope of f(X) at X = 2 → 12</td></tr><tr><td>${KX('Σ(X, 1, 100)')}</td><td>Sum of f(X) for X = 1, 2 … 100 → 5050</td></tr></table><p>Inside these, <b>X</b> is the variable. Use the ∫, d/dx and Σ keys to insert them.</p>`)}
+    ${MAN('Constants and unit conversions', `<p>The search box under the display has the fx's <b>40 scientific constants</b> (CODATA 2018) and <b>40 unit conversions</b>. Type what you want, like <i>light</i>, <i>planck</i>, <i>inch</i>, <i>psi</i> or <i>celsius</i>, and pick it (Enter or a tap).</p><p>Constants work like numbers: ${KX('1/√([ε0][μ0])')} = 299792458. Conversions go <b>after</b> a value: ${KX('5 [cm▸in]')} = 1.968503937, ${KX('-31 [°C▸°F]')} = -23.8.</p>`)}
+    ${MAN('Equation', `<p>Pick the kind of equation, type the coefficients (they can be expressions like ${KX('1/3')} or ${KX('√2')}) and press <b>Solve</b>.</p><ul><li><b>aX² + bX + c = 0</b>: both roots, complex ones too (−1 + 2i), and the turning point.</li><li><b>aX³ + bX² + cX + d = 0</b>: all three roots.</li><li><b>2 or 3 unknowns</b>: one row per equation, e.g. 2X + 3Y = 8.</li><li><b>Solve for X</b>: any equation like ${KX('X² = 2')} or ${KX('cos(X) = X')}; change the start value to find other solutions.</li></ul><p><b>Insert</b> adds the answer to the open page.</p>`)}
+    ${MAN('Stats', `<p>Type one value per line for averages and spread: n, mean x̄, Σx, Σx², σx (population), sx (sample), min, Q1, median, Q3, max. Type <b>x, y</b> pairs on every line to also get ȳ, Σxy and the regression line <b>y = a + bx</b> with its correlation <b>r</b>.</p>`)}
+    ${MAN('Table and graphs', `<p>Type up to four functions of X — <b>f, g, h, p</b> (＋ Add function); the coloured dot hides or shows one. <b>Table</b> lists their values from Start to End in steps. <b>Graph</b> draws them.</p><ul><li><b>Limits:</b> set X min / X max, and Y min / Y max (leave Y on <i>auto</i> to fit the curves).</li><li><b>Move around:</b> drag to pan, scroll or pinch to zoom, or use + / −. ⛶ resets to −10…10, ⇤ makes the panel wider.</li><li><b>Trace:</b> hover (or tap) a curve to read its (x, y); it snaps to key points.</li><li><b>Key points:</b> roots, minimums, maximums, y-intercepts and where curves cross are marked and listed under the graph — click one to jump to it.</li><li><b>Sliders:</b> use letters A–F, M or Y in a function (${KX('A·X² + B')}) and a slider appears for each; type a value in its box to go beyond −10…10.</li></ul><p><b>Insert into page</b> puts the graph into the open page as a picture (matching a dark or a light page); you can also <b>copy</b> it or <b>save</b> it as a PNG.</p>`)}
+    ${MAN('Math answers in your notes', `<p><b>In notebook pages</b>, type a sum ending in = — ${KX('12*4 + 7 =')} — and the answer appears in grey after it. <b>Tab</b>, <b>Enter</b> or a tap types it in; keep typing to ignore it. A line like ${KX('price = 12')} sets a value you can use further down (${KX('price * 3 =')}). It understands $, thousands commas (1,200) and 3 x 4.</p><p><b>In equations</b> (Alt+=), end the equation with = and its answer shows after it: <code>\\frac{3}{4}+2^3 =</code> → 35/4. It follows the equation as you edit it and isn't saved into the page. Both can be switched off below.</p>`)}
+  </section>`;
+}
+function bindCalcSettings() {
+  const box = $('#calcSet'); if (!box) return; const C = CS(), redraw = () => { if (!$('#calc').hidden) drawCalc(); renderAllMath(); };
+  $('#csAng').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; C.ang = b.dataset.a; save(); box.querySelectorAll('#csAng button').forEach(x => x.classList.toggle('on', x === b)); redraw(); };
+  $('#csFrac').onchange = e => { C.frac = e.target.checked; save(); redraw(); };
+  $('#csDig').onchange = e => { C.digits = +e.target.value; save(); redraw(); };
+  $('#csHist').onclick = () => { if (!C.hist.length || !confirm('Clear the calculator history?')) return; C.hist = []; save(); viewSettings('calc'); redraw(); };
+  $('#csMem').onclick = () => { if (!confirm('Clear memories A–F, M, X, Y and Ans?')) return; C.vars = {}; C.ans = 0; save(); viewSettings('calc'); };
+  $('#csOpen').onclick = () => toggleCalc(true);
+}
+
+/* ---------- math answers after "=" (like Apple Math Notes): in equations, and in notebook page text ---------- */
+const TEXCMD = { cdot: '×', times: '×', ast: '×', div: '÷', pi: 'π', ln: 'ln', log: 'log', exp: 'exp', sin: 'sin', cos: 'cos', tan: 'tan', sinh: 'sinh', cosh: 'cosh', tanh: 'tanh',
+  arcsin: 'asin', arccos: 'acos', arctan: 'atan', '%': '%', ',': '', ';': '', ':': '', '!': '', ' ': '', quad: '', qquad: '', displaystyle: '' };
+function texToCalc(s) { // LaTeX (the usual school subset) -> calculator expression; throws on anything else
+  let i = 0, out = '';
+  const ws = () => { while (s[i] === ' ') i++; };
+  const grp = () => { // {…}, one \command, or one character
+    ws();
+    if (s[i] === '{') { let d = 0, j = i; for (; j < s.length; j++) { if (s[j] === '{') d++; else if (s[j] === '}' && !--d) break; } if (j >= s.length) throw CalcErr(); const g = s.slice(i + 1, j); i = j + 1; return g; }
+    if (s[i] === '\\') { const m = /^\\([a-zA-Z]+|.)/.exec(s.slice(i)); i += m[0].length; return m[0]; }
+    if (i >= s.length) throw CalcErr(); return s[i++];
+  };
+  const sub = g => `(${texToCalc(g)})`;
+  const atom = () => { // argument after \log_{b}: {…}, (…) or a number / symbol
+    ws(); if (s.startsWith('\\left', i)) i += 5;
+    if (s[i] === '(') { let d = 0, j = i; for (; j < s.length; j++) { if (s[j] === '(') d++; else if (s[j] === ')' && !--d) break; } const g = s.slice(i + 1, j).replace(/\\right\s*$/, ''); i = j + 1; return g; }
+    const m = /^(\d+\.?\d*|\.\d+)/.exec(s.slice(i)); if (m) { i += m[0].length; return m[0]; }
+    return grp();
+  };
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '\\') {
+      const m = /^\\([a-zA-Z]+|.)/.exec(s.slice(i)); i += m[0].length; const n = m[1];
+      if (/^[dt]?frac$/.test(n)) { const a = grp(), b = grp(); out += `(${sub(a)}÷${sub(b)})`; }
+      else if (n === 'sqrt') { ws(); let k = null; if (s[i] === '[') { const j = s.indexOf(']', i); k = s.slice(i + 1, j); i = j + 1; } const x = grp(); out += k ? `(${sub(x)}^(1÷${sub(k)}))` : `√${sub(x)}`; }
+      else if (n === 'left' || n === 'right') { ws(); let d = s[i++]; if (d === '\\') d = s[i++]; out += d === '|' ? (n === 'left' ? 'abs(' : ')') : d === '.' ? '' : '([{'.includes(d) ? '(' : ')'; }
+      else if (n === 'operatorname' || n === 'mathrm' || n === 'text') out += texToCalc(grp());
+      else if (n in TEXCMD) out += TEXCMD[n];
+      else throw CalcErr();
+    }
+    else if (c === '^') {
+      i++; const g = grp().trim();
+      if (g === '\\circ') continue; // 30^\circ: angles follow the calculator's DEG/RAD setting
+      if (g === '-1' && /(sin|cos|tan)h?$/.test(out)) out = out.replace(/(sin|cos|tan)(h?)$/, 'a$1$2'); else out += `^${sub(g)}`;
+    }
+    else if (c === '_') { i++; const b = grp(); if (!out.endsWith('log')) throw CalcErr(); out += `(${texToCalc(b)},${texToCalc(atom())})`; }
+    else if (c === '{' || c === '[') { out += '('; i++; }
+    else if (c === '}' || c === ']') { out += ')'; i++; }
+    else if (c === '&' || c === '~') i++;
+    else { out += c; i++; }
+  }
+  return out;
+}
+const isNum = s => /^\s*[-+]?(\d+\.?\d*|\.\d+)\s*$/.test(s);
+const ansText = (v, src) => /[[.]/.test(src) ? calcFmt(v) : calcShow(v); // typed decimals or units -> decimal answer
+function texAnswer(tex) { // equation ending in "=" -> answer text, or null
+  if (S?.settings.mathEq === false) return null;
+  const m = /^([\s\S]*[^=<>!\\])=\s*$/.exec((tex || '').trim()); if (!m) return null;
+  const ex = m[1].slice(m[1].lastIndexOf('=') + 1); // "y = 2+3 =" answers 2+3
+  try { const src = texToCalc(ex); if (isNum(src)) return null; return ansText(calcEval(src), src); } catch { return null; }
+}
+const ansTex = a => a.replace(/^(-?)(\d+)\/(\d+)$/, '$1\\frac{$2}{$3}').replace(/×10\^(-?\d+)/, '\\times10^{$1}');
+function texWithAns(tex) { const a = texAnswer(tex); return a == null ? tex : `${tex}\\;\\color{${getComputedStyle(document.documentElement).getPropertyValue('--acc2').trim() || '#2dbe60'}}{${ansTex(a)}}`; }
+
+const prepText = (ex, names) => { // everyday typing: $12, 1,200, 3 x 4
+  ex = ex.replace(/[$€£¥]/g, '').replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
+  if (!('x' in names)) ex = ex.replace(/([\d.)])\s*x\s*(?=[\d.(])/g, '$1×');
+  return ex.trim();
+};
+function pageVars(root) { // "price = 12" lines on the page -> { price: 12 }
+  const names = {};
+  for (const ln of root.innerText.split('\n')) {
+    const m = /^\s*([A-Za-z_]\w*)\s*=\s*([^=]+?)\s*$/.exec(ln);
+    if (!m || CFUNCS.includes(m[1]) || m[1] === 'Ans') continue;
+    try { names[m[1]] = calcChk(calcParse(prepText(m[2], names), names)({ vars: CS().vars, ans: CS().ans })); } catch { }
+  }
+  return names;
+}
+function textAnswer(line, names) { // "12*4 + 7 =" -> "55", or null
+  const m = /^(.*[^=<>!])=\s*$/.exec(line); if (!m) return null;
+  const ex = prepText(m[1].slice(Math.max(m[1].lastIndexOf('='), m[1].lastIndexOf(':')) + 1), names); // "Total: 3+4 =", "y = 3+4 ="
+  if (!ex || isNum(ex)) return null;
+  try { return calcFmt(calcChk(calcParse(ex, names)({ vars: CS().vars, ans: CS().ans }))); } catch { return null; } // page text: plain decimals, like Apple's Math Notes
+}
+function lineBeforeCaret(root, r) { // the text of the current line, up to the caret
+  let blk = r.startContainer.nodeType === 3 ? r.startContainer.parentNode : r.startContainer;
+  blk = blk.closest?.('p,div,li,h1,h2,h3,blockquote,pre,td') || root; if (!root.contains(blk)) blk = root;
+  const rr = document.createRange(); rr.setStart(blk, 0); rr.setEnd(r.startContainer, r.startOffset);
+  const f = rr.cloneContents(); f.querySelectorAll('br').forEach(b => b.replaceWith('\n')); f.querySelectorAll('.math,.ntag,input').forEach(x => x.replaceWith('￼'));
+  return f.textContent.split('\n').pop();
+}
+function mathGhost(body, wrap) { // grey answer after "…=" at the caret; Tab / Enter / a tap types it in
+  const g = Object.assign(document.createElement('span'), { className: 'mghost', title: 'Tab or Enter to keep the answer' }); g.dataset.noink = ''; g.hidden = true; wrap.append(g);
+  let ans = null;
+  const hide = () => { g.hidden = true; ans = null; };
+  const show = () => {
+    hide(); if (S.settings.mathText === false) return;
+    const sel = getSelection(); if (!sel.rangeCount || !sel.isCollapsed) return;
+    const r = sel.getRangeAt(0); if (!body.contains(r.startContainer)) return;
+    const line = lineBeforeCaret(body, r); if (!/=\s*$/.test(line)) return;
+    const a = textAnswer(line, pageVars(body)); if (a == null) return;
+    const rect = r.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); if (!rect.height) return;
+    ans = (/\s=$/.test(line) ? ' ' : '') + a;
+    const cs = getComputedStyle(r.startContainer.nodeType === 3 ? r.startContainer.parentNode : r.startContainer);
+    Object.assign(g.style, { left: rect.right - wr.left + wrap.scrollLeft + 'px', top: rect.top - wr.top + wrap.scrollTop + 'px', height: rect.height + 'px', lineHeight: rect.height + 'px', fontSize: cs.fontSize, fontWeight: cs.fontWeight, fontFamily: cs.fontFamily });
+    g.textContent = ans; g.hidden = false;
+  };
+  const accept = () => { const t = ans; hide(); body.focus(); document.execCommand('insertText', false, t); };
+  body.addEventListener('keydown', e => {
+    if (ans != null && (e.key === 'Tab' || e.key === 'Enter') && !e.shiftKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); e.stopImmediatePropagation(); accept(); }
+    else if (e.key !== 'Shift') hide();
+  }, true);
+  body.addEventListener('input', () => setTimeout(show));
+  body.addEventListener('blur', hide); body.addEventListener('pointerdown', hide);
+  g.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); if (ans != null) accept(); };
+}
+
+/* ---------- AI assistant ---------- */
+const aiLog = [];
+$('#aiBtn').onclick = () => { $('#ai').hidden = !$('#ai').hidden; drawAI(); };
+$('#aiClose').onclick = () => $('#ai').hidden = true;
+function drawAI() {
+  const log = $('#aiLog');
+  if (!NATIVE) return log.innerHTML = DESKTOP_ONLY('The AI assistant (DeepSeek)');
+  log.innerHTML = (S.settings.aiKey ? '' : '<div class="msg sys">Add a DeepSeek API key in <a href="#/settings">Settings</a> to enable the assistant.</div>')
+    + aiLog.map((m, i) => `<div class="msg ${m.role}">${esc(m.content)}${m.role === 'assistant' && insertIntoNote && m.content !== '…' ? `<button data-ins="${i}">Insert into note</button>` : ''}</div>`).join('');
+  log.scrollTop = log.scrollHeight;
+}
+$('#aiLog').onclick = e => { const b = e.target.closest('[data-ins]'); if (b && insertIntoNote) insertIntoNote(aiLog[b.dataset.ins].content); };
+document.querySelectorAll('#ai [data-q]').forEach(b => b.onclick = () => { $('#aiForm').q.value = b.dataset.q; $('#aiForm').requestSubmit(); });
+$('#aiForm').q.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#aiForm').requestSubmit(); } };
+$('#aiForm').onsubmit = async e => {
+  e.preventDefault();
+  const q = e.target.q.value.trim(); if (!q) return;
+  if (!NATIVE || !S.settings.aiKey) return drawAI();
+  e.target.q.value = '';
+  aiLog.push({ role: 'user', content: q });
+  const open = currentNote ? `Title: ${currentNote.title}\n\n${plain(currentNote.html)}` : currentFileText;
+  const ctx = $('#aiCtx').checked && open ? `\n\nThe user has this open:\n${open.slice(0, 60000)}` : '';
+  const messages = [{ role: 'system', content: 'You are a concise assistant inside a personal notes app. Write math as LaTeX between $...$ or $$...$$.' + ctx }, ...aiLog.filter(m => m.role !== 'sys')];
+  const reply = { role: 'assistant', content: '…' }; aiLog.push(reply); drawAI();
+  try { reply.content = await window.native.ai({ key: S.settings.aiKey, model: S.settings.aiModel, messages }); }
+  catch (err) { reply.role = 'sys'; reply.content = 'Error: ' + err.message.replace(/^Error invoking remote method 'ai': (Error: )?/, ''); }
+  drawAI();
+};
+
+if (!NATIVE) $('#aiBtn').style.display = 'none'; // web: the floating button would only say "desktop app only" (Settings and Ctrl+J still explain it)
+if (window.native?.onUpdate) window.native.onUpdate(u => {
+  document.querySelector('.upd')?.remove();
+  const t = Object.assign(document.createElement('div'), { className: 'toast upd' });
+  t.innerHTML = u.url ? `LocalNotes ${esc(u.version)} is out — <a href="${esc(u.url)}" target="_blank">download it</a> <button>×</button>` : `Update ready — restart to install <button class="pri">Restart</button> <button>Later</button>`;
+  t.onclick = async e => { if (e.target.classList.contains('pri')) { await window.flushNow(); window.native.installUpdate(); } else if (e.target.tagName === 'BUTTON') t.remove(); };
+  document.body.append(t);
+});
+load().then(() => { route(); if (IS_WIDGET) bc?.postMessage({ type: 'hello' }); else { syncCals(); startSync(); } }).catch(err => { main.innerHTML = `<div class="page"><h1>Could not open storage</h1><p>${esc(err.message)}</p></div>`; });
+// katex.min.js is deferred, so it always loads after this file
+document.getElementById('katexJs').addEventListener('load', renderAllMath);
