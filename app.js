@@ -13,7 +13,9 @@ const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')
 const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const today = () => ymd(new Date());
 const firstOf = d => new Date(d.getFullYear(), d.getMonth(), 1);
-const plain = h => (h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+const plainCache = new Map(); // search and lists ask for the same pages' text on every keystroke; ponytail: keyed by the html string, emptied at 2000 entries
+const plain = h => { if (!h || h.length < 200) return plainRaw(h); let t = plainCache.get(h); if (t === undefined) { if (plainCache.size > 2000) plainCache.clear(); plainCache.set(h, t = plainRaw(h)); } return t; };
+const plainRaw = h => (h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
 const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : new Date(t).toLocaleDateString(LOC); };
 const kb = n => n < 1048576 ? `${Math.max(1, n / 1024 | 0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 const openLink = url => CAP ? void (location.href = url) : window.open(url, '_blank', 'noopener'); // Android hands a page that isn't the app to the browser
@@ -79,6 +81,7 @@ const ICONS = {
   check: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12 3 3 5-6"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'
 };
 const icon = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+const lbl = t => `<span class="lbl">${t}</span>`, ilbl = (n, t) => `<span class="lico">${icon(n, 18)}</span>${lbl(t)}`; // lbl: hidden on phones, so its button needs a title. ilbl: text on the desktop, icon on phones
 $('#aiBtn').innerHTML = icon('sparkle', 24);
 
 /* ---------- storage: app state in one record, file blobs in their own store ---------- */
@@ -90,9 +93,15 @@ const idb = () => new Promise((res, rej) => {
 });
 const idbGet = (store, key) => new Promise(res => { const q = db.transaction(store).objectStore(store).get(key); q.onsuccess = () => res(q.result); });
 const idbPut = (store, key, val) => new Promise((res, rej) => { const t = db.transaction(store, 'readwrite'); t.objectStore(store).put(val, key); t.oncomplete = res; t.onerror = t.onabort = () => rej(t.error || new Error('Could not write to storage')); }); // a full disk aborts the transaction, it doesn't error
+const idbAll = (store, range) => new Promise(res => { const o = db.transaction(store).objectStore(store), k = o.getAllKeys(range), v = o.getAll(range); v.onsuccess = () => res(k.result.map((key, i) => [key, v.result[i]])); });
+const SPLIT = ['notes', 'boards'], onDisk = new Map(); // record key -> the JSON on disk, so a save writes only what changed
 async function load() {
   db = await idb();
   S = await idbGet('kv', 'state') || seed();
+  for (const k of SPLIT) if (typeof S[k]?.[0] === 'string') { // pages and boards live in their own records; the state record lists their ids
+    (await idbAll('kv', IDBKeyRange.bound(k + ':', k + ':\uffff'))).forEach(([key, j]) => onDisk.set(key, j));
+    S[k] = S[k].map(id => onDisk.get(k + ':' + id)).filter(Boolean).map(j => JSON.parse(j));
+  }
   S.files ||= []; S.ics ||= {}; S.settings.cals ||= []; S.trash ||= []; S.refs ||= []; S.templates ||= []; purgeOldTrash();
   if (!S.migratedSections) migrateSections();
   inkState.shapes = S.settings.inkShapes ?? true; applyTheme();
@@ -116,12 +125,21 @@ function migrateSections() {
   S.migratedSections = true;
 }
 let saveT;
-// ponytail: rewrites the whole state on each save; split per-record if boards get huge
+// ponytail: each save still stringifies every page to find the changed ones, and rewrites the rest of the state (tasks, trash, file text); track dirty records if that shows up
 const save = () => { clearTimeout(saveT); saveT = setTimeout(flush, IS_WIDGET ? 0 : 300); }; // the mini window sends edits at once so a stale copy never lands after the main window changed
 // one write at a time, so a slower encrypted save can't land after a newer one
 let saveQ = Promise.resolve(), saveFailed = false;
 const writeState = () => saveQ = saveQ.then(async () => {
-  try { await idbPut('kv', 'state', await sealState()); saveFailed = false; bcState(); scheduleSync(); }
+  try {
+    const st = await sealState(), out = { ...st }, puts = [], live = new Set();
+    for (const k of SPLIT) out[k] = (st[k] || []).map(r => { const key = k + ':' + r.id, j = JSON.stringify(r); live.add(key); if (onDisk.get(key) !== j) puts.push([key, j]); return r.id; });
+    const dels = [...onDisk.keys()].filter(key => !live.has(key));
+    await new Promise((res, rej) => { // one transaction: the id list and its records land together or not at all
+      const t = db.transaction('kv', 'readwrite'), o = t.objectStore('kv'); puts.forEach(([key, j]) => o.put(j, key)); dels.forEach(key => o.delete(key)); o.put(out, 'state');
+      t.oncomplete = res; t.onerror = t.onabort = () => rej(t.error || new Error('Could not write to storage'));
+    });
+    puts.forEach(([key, j]) => onDisk.set(key, j)); dels.forEach(key => onDisk.delete(key));
+    saveFailed = false; bcState(); scheduleSync(); syncReminders(); }
   catch (e) { console.error(e); if (!saveFailed) toast('Could not save — storage may be full. Export a backup from Settings.'); saveFailed = true; }
 });
 const flush = async () => { if (!S) return; if (IS_WIDGET) return bc?.postMessage({ type: 'patch', tasks: S.tasks, events: S.events, scratch: S.scratch }); return writeState(); };
@@ -244,7 +262,7 @@ function inkGroup(bar) { // one toolbar + undo stack shared by every surface in 
     bar.querySelector('.ink-mode').value = inkState.mode; bar.querySelector('.ink-size').value = inkState.size;
     bar.querySelectorAll('[data-ink-tool]').forEach(b => b.classList.toggle('on', b.dataset.inkTool === inkState.tool));
     bar.querySelectorAll('[data-ink-col]').forEach(b => b.classList.toggle('on', b.dataset.inkCol === inkState.color));
-    g.surfaces.forEach(s => { s.host.style.touchAction = inkState.mode === 'type' ? '' : 'none'; if (inkState.tool !== 'lasso') s.clearSel?.(); });
+    g.surfaces.forEach(s => { s.host.style.touchAction = inkState.mode === 'type' || (CAP && inkState.mode === 'pen') ? '' : 'none'; if (inkState.tool !== 'lasso') s.clearSel?.(); });
     document.body.dataset.ink = inkState.mode;
   };
   bar.onchange = e => { if (e.target.matches('.ink-mode')) inkState.mode = e.target.value; if (e.target.matches('.ink-size')) inkState.size = +e.target.value; g.sync(); };
@@ -264,12 +282,12 @@ function inkGroup(bar) { // one toolbar + undo stack shared by every surface in 
   return g;
 }
 // "Stylus draws": ink surfaces keep touch-action:none so the pen never scrolls; a finger scrolls them by hand (with a little glide)
-let penDown = false;
+let penDown = false, pinching = false; // pinching: two fingers are zooming a PDF, so touchScroll stands still
 function touchScroll(e, host) {
   let sc = host; while (sc && !(sc.scrollHeight > sc.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement;
   if (!sc) return;
   const id = e.pointerId; let x = e.clientX, y = e.clientY, t = performance.now(), v = 0;
-  const mv = m => { if (m.pointerId !== id) return; const now = performance.now(), dy = m.clientY - y; sc.scrollTop -= dy; sc.scrollLeft -= m.clientX - x; v = dy / Math.max(1, now - t); x = m.clientX; y = m.clientY; t = now; };
+  const mv = m => { if (m.pointerId !== id || pinching) return; const now = performance.now(), dy = m.clientY - y; sc.scrollTop -= dy; sc.scrollLeft -= m.clientX - x; v = dy / Math.max(1, now - t); x = m.clientX; y = m.clientY; t = now; };
   const end = m => {
     if (m.pointerId !== id) return;
     removeEventListener('pointermove', mv, true); removeEventListener('pointerup', end, true); removeEventListener('pointercancel', end, true);
@@ -280,8 +298,8 @@ function touchScroll(e, host) {
   addEventListener('pointermove', mv, true); addEventListener('pointerup', end, true); addEventListener('pointercancel', end, true);
 }
 // host: element receiving pointer events (scrolls with the canvas); list(): stroke array; unit(): CSS px per stored unit
-function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always = false, pen = null }) { // pen: fixed {c, w} instead of the toolbar's
-  const c = canvas.getContext('2d'), dpr = devicePixelRatio || 1;
+function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always = false, pen = null, lazy = false }) { // pen: fixed {c, w} instead of the toolbar's
+  const c = canvas.getContext('2d'), dpr = Math.min(devicePixelRatio || 1, 2);
   host.classList.add('inkhost');
   const maxY = () => list().reduce((m, s) => { for (let i = 1; i < s.pts.length; i += 3) m = Math.max(m, s.pts[i]); return m; }, 0) * unit();
   size ||= () => { canvas.style.height = '0px'; return [host.clientWidth, Math.max(host.scrollHeight, maxY() + 200)]; };
@@ -293,9 +311,9 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
     c.beginPath(); c.arc(b.x + b.w + p, b.y + b.h + p, 7 / u, 0, 7); c.fill(); c.restore();
     placeBar(b);
   };
-  const redraw = () => { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, canvas.width, canvas.height); const k = dpr * unit(); c.setTransform(k, 0, 0, k, 0, 0); list().forEach(st => drawStroke(c, st)); drawSel(); };
-  const fit = () => { const [w, h] = size(); Object.assign(canvas.style, { width: w + 'px', height: h + 'px' }); canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); redraw(); };
-  const s = { host, list, fit, redraw, apply(rm, add) { const L = list(); rm.forEach(r => { const i = L.indexOf(r); if (i >= 0) L.splice(i, 1); }); L.push(...add); redraw(); save(); } };
+  const redraw = () => { if (!canvas.width) return list().length ? fit() : undefined; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, canvas.width, canvas.height); const k = dpr * unit(); c.setTransform(k, 0, 0, k, 0, 0); list().forEach(st => drawStroke(c, st)); drawSel(); };
+  const fit = () => { const [w, h] = size(); Object.assign(canvas.style, { width: w + 'px', height: h + 'px' }); const on = cur || list().length; canvas.width = on ? Math.round(w * dpr) : 0; canvas.height = on ? Math.round(h * dpr) : 0; if (canvas.width) redraw(); }; // no ink, no pixels: a page-tall transparent layer slows every scroll frame
+  const s = { host, list, fit, redraw, free() { canvas.width = canvas.height = 0; }, apply(rm, add) { const L = list(); rm.forEach(r => { const i = L.indexOf(r); if (i >= 0) L.splice(i, 1); }); L.push(...add); redraw(); save(); } };
   const clone = st => ({ ...st, pts: [...st.pts] });
   const placeBar = b => { const bar = document.querySelector('.inksel'); if (!bar) return; const r = canvas.getBoundingClientRect(), u = unit(); bar.style.left = Math.max(8, Math.min(innerWidth - bar.offsetWidth - 8, r.left + b.x * u)) + 'px'; bar.style.top = Math.max(8, r.top + b.y * u - 54) + 'px'; };
   const swap = (news, olds = sel.strokes) => { s.apply(olds, news); g.undo.push({ s, add: news, del: olds }); g.redo = []; if (news.length) { sel = { strokes: news }; redraw(); } else s.clearSel(); };
@@ -315,7 +333,8 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
     };
     document.body.append(bar); placeBar(boxOf(sel.strokes));
   }
-  addEventListener('scroll', () => sel && canvas.isConnected && placeBar(boxOf(sel.strokes)), true);
+  const onScroll = () => { if (!canvas.isConnected) return removeEventListener('scroll', onScroll, true); if (sel) placeBar(boxOf(sel.strokes)); };
+  addEventListener('scroll', onScroll, true);
   const inPoly = (x, y, P) => { let inn = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > y) !== (P[j][1] > y) && x < (P[j][0] - P[i][0]) * (y - P[i][1]) / (P[j][1] - P[i][1]) + P[i][0]) inn = !inn; return inn; };
   const pt = v => { const r = canvas.getBoundingClientRect(), u = unit(); return [Math.round((v.clientX - r.left) / u * 10) / 10, Math.round((v.clientY - r.top) / u * 10) / 10]; };
   let cur = null;
@@ -354,7 +373,7 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
       } else { s.clearSel(); cur = { id: e.pointerId, lasso: [[x, y]] }; }
       return;
     }
-    if (!always && inkState.mode === 'pen' && e.pointerType === 'touch') return touchScroll(e, host);
+    if (!always && inkState.mode === 'pen' && e.pointerType === 'touch') return CAP ? undefined : touchScroll(e, host); // Android scrolls these natively: the pen is held back in noScribble
     if (!always && e.pointerType === 'touch' && cur?.touch) { // "Draw (all input)": a second finger landing right away means two-finger scroll, not drawing
       e.preventDefault(); e.stopPropagation();
       if (performance.now() - cur.t0 > 400) return; // the first finger has been drawing a while: treat this one as a resting hand
@@ -367,14 +386,15 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
     const erase = inkState.tool === 'eraser' || e.button === 5 || (e.buttons & 32);
     penDown = e.pointerType === 'pen';
     cur = { id: e.pointerId, touch: e.pointerType === 'touch', t0: performance.now(), erase, removed: [], s: erase ? null : { t: 'pen', c: pen?.c || inkState.color, w: pen?.w || inkState.size, pts: [] } };
+    if (!canvas.width) fit();
     move(e);
   }, true);
   // iPad: a Pencil touch on an editable page would focus the text and start Scribble (Pencil → typed text).
   // Cancelling the stylus touch keeps it ink only; pointer events still arrive. "Type only" mode leaves Scribble on.
   const noScribble = e => {
-    if ((always || inkState.mode !== 'type') && [...e.changedTouches].some(t => t.touchType === 'stylus')) { const shield = e.target.closest?.('[data-noink]'); if (!shield || shield.contains(host)) e.preventDefault(); }
+    if ((always || inkState.mode !== 'type') && (penDown || [...e.changedTouches].some(t => t.touchType === 'stylus'))) { const shield = e.target.closest?.('[data-noink]'); if (!shield || shield.contains(host)) e.preventDefault(); }
   };
-  host.addEventListener('touchstart', noScribble, { passive: false, capture: true }); host.addEventListener('touchmove', noScribble, { passive: false, capture: true });
+  host.addEventListener('touchstart', noScribble, { passive: false, capture: true }); if (!CAP) host.addEventListener('touchmove', noScribble, { passive: false, capture: true }); // Android needs only touchstart: a blocking touchmove holds native scrolling back on the main thread
   host.addEventListener('pointermove', move, true);
   const up = e => {
     if (!cur || e.pointerId !== cur.id) return;
@@ -395,7 +415,7 @@ function attachInk(g, { host, canvas, list, unit = () => 1, save, size, always =
     cur = null; penDown = false;
   };
   host.addEventListener('pointerup', up, true); host.addEventListener('pointercancel', up, true);
-  g.surfaces.push(s); fit(); g.sync();
+  g.surfaces.push(s); lazy || fit(); g.sync();
   return s;
 }
 
@@ -439,6 +459,7 @@ const isSealed = s => !!s?.lock && !secKeys.has(s.id);
 const noteSealed = n => isSealed(secOf(n.sectionId));
 const openNotes = () => S.notes.filter(n => !noteSealed(n));
 async function sealState() { // what goes to disk: pages of protected sections only as ciphertext
+  commitEdit?.();
   if (!S.sections?.some(s => s.lock) && !S.notes.some(n => n.enc)) return S;
   const notes = await Promise.all(S.notes.map(async n => {
     const s = secOf(n.sectionId);
@@ -457,7 +478,7 @@ function protectSection(s) {
   });
 }
 async function lockSection(s) {
-  const key = secKeys.get(s.id); if (!key) return;
+  const key = secKeys.get(s.id); if (!key) return; commitEdit?.();
   for (const n of S.notes.filter(n => n.sectionId === s.id)) { n.enc = await encJSON(key, { title: n.title, html: n.html, ink: n.ink || [] }); n.title = ''; n.html = ''; n.ink = []; }
   secKeys.delete(s.id); await window.flushNow();
   if (['nb', 'notes', 'home', ''].includes(view)) route();
@@ -632,6 +653,7 @@ function viewWidget() {
 }
 
 /* ---------- routing ---------- */
+let commitEdit = null; // writes the open page's text into its note; typing only marks it changed, the save (or leaving the page) does the work
 let viewKey = null, currentNote = null, currentFileText = null, insertIntoNote = null, insertImageIntoNote = null, view = 'home';
 document.addEventListener('keydown', e => viewKey?.(e));
 let viewKeyUp = null, viewPaste = null;
@@ -640,6 +662,7 @@ document.addEventListener('paste', e => viewPaste?.(e));
 addEventListener('hashchange', route);
 let sideArgs = [];
 function route() {
+  commitEdit?.(); commitEdit = null;
   closePdf(); document.querySelector('.inksel')?.remove(); if (tts.btn && location.hash !== tts.hash) stopSpeech();
   viewKey = viewKeyUp = viewPaste = currentNote = currentFileText = insertIntoNote = insertImageIntoNote = boardSync = pageCtx = null;
   const [v = 'home', a, b, c] = location.hash.replace(/^#\/?/, '').split('/'); view = v;
@@ -683,7 +706,7 @@ async function newSection(nb) {
 function newNote(secId, o = {}) { // o.after: insert right below that page; o.level: subpage depth
   const sec = secOf(secId) || defaultSection(), list = pagesOf(sec.id), prev = o.after || list.at(-1);
   if (isSealed(sec)) return toast('Unlock this section first');
-  const n = { id: uid(), title: '', html: '', sectionId: sec.id, notebookId: sec.notebookId, level: o.level || 0, order: Date.now(), paper: prev?.paper || 'blank', pcolor: prev?.pcolor || 'dark', created: Date.now(), updated: Date.now() };
+  const n = { id: uid(), title: o.title || '', html: o.html || '', sectionId: sec.id, notebookId: sec.notebookId, level: o.level || 0, order: Date.now(), paper: prev?.paper || 'blank', pcolor: prev?.pcolor || 'dark', created: Date.now(), updated: Date.now() };
   if (o.after && o.after.sectionId === sec.id) { list.splice(list.indexOf(o.after) + 1, 0, n); list.forEach((p, i) => p.order = i); }
   S.notes.push(n); save(); location.hash = pageHref(n);
 }
@@ -702,9 +725,8 @@ NARROW.addEventListener('change', () => S && renderSide(...sideArgs));
 function renderPhoneNav(v) { // bottom tabs; the rest is under More
   document.body.classList.remove('collapsed');
   const tab = (id, ic, label, on, href) => `<${href ? `a href="${href}"` : 'button'} class="ptab${on ? ' on' : ''}" id="${id}">${icon(ic, 22)}<span>${label}</span></${href ? 'a' : 'button'}>`;
-  $('#side').innerHTML = `${tab('tHome', 'home', 'Home', v === 'home' || v === '', '#/home')}${tab('tNb', 'book', 'Notebooks', v === 'nb')}${tab('tTasks', 'tasks', 'Tasks', v === 'tasks', '#/tasks')}${tab('tFiles', 'files', 'Files', v === 'files', '#/files')}${tab('tMore', 'list', 'More', ['notes', 'calendar', 'boards', 'board', 'trash', 'settings'].includes(v))}
-    <button class="newbtn" id="sNew" title="New note">${icon('noteplus', 24)}</button>`;
-  $('#sNew').onclick = () => newNote(curSection);
+  $('#side').innerHTML = `${tab('tHome', 'home', 'Home', v === 'home' || v === '', '#/home')}${tab('tNb', 'book', 'Notebooks', v === 'nb')}${tab('tTasks', 'tasks', 'Tasks', v === 'tasks', '#/tasks')}${tab('tFiles', 'files', 'Files', v === 'files', '#/files')}${tab('tMore', 'list', 'More', ['notes', 'calendar', 'boards', 'board', 'trash', 'settings'].includes(v))}${['', 'home', 'notes', 'nb'].includes(v) ? `<button class="newbtn" id="sNew" title="New note">${icon('noteplus', 24)}</button>` : ''}`;
+  if ($('#sNew')) $('#sNew').onclick = () => newNote(curSection);
   const at = b => { const r = b.getBoundingClientRect(); return { preventDefault() { }, clientX: r.left, clientY: r.top - 8 - 330 }; }, go = h => () => location.hash = h;
   $('#tNb').onclick = e => S.notebooks.length === 1 ? location.hash = `#/nb/${S.notebooks[0].id}` : ctxMenu(at(e.currentTarget), [...S.notebooks.map(n => [esc(n.name), go(`#/nb/${n.id}`)]), '-', ['＋ New notebook', () => newNotebook()]]);
   $('#tMore').onclick = e => ctxMenu(at(e.currentTarget), [[`${icon('search', 16)} Search`, focusSearch], [`${icon('notes', 16)} All notes`, go('#/notes')], [`${icon('calendar', 16)} Calendar`, go('#/calendar')], [`${icon('pen', 16)} Whiteboards`, go('#/boards')], [`${icon('calc', 16)} Calculator`, () => toggleCalc(true)], ...(NATIVE ? [[`${icon('bulb', 16)} AI assistant`, () => $('#aiBtn').click()]] : []), '-', [`${icon('trash', 16)} Trash${S.trash.length ? ` (${S.trash.length})` : ''}`, go('#/trash')], [`${icon('settings', 16)} Settings`, go('#/settings')]]);
@@ -835,7 +857,7 @@ function viewNotebook(nbId, secId, pageId) {
   const pages = pagesOf(sec.id), page = pages.find(p => p.id === pageId) || pages.find(p => p.id === sec.lastPage) || pages[0];
   if (page) sec.lastPage = page.id;
   main.innerHTML = `<div class="on-wrap" style="--secc:${sec.color}">
-    <div class="on-top"><h2>${icon('book')}<span>${esc(nb.name)}</span></h2><a class="btn" href="#/nb/${nb.id}/index" title="Contents and A–Z index of this notebook">${icon('list', 16)} Index</a><a class="btn" href="#/nb/${nb.id}/tags" title="Every tagged line in this notebook">${icon('tag', 16)} Tags summary</a>${sec.lock && !isSealed(sec) ? `<button id="lockNow" title="Lock this section now">${icon('lock', 16)} Lock</button>` : ''}<button id="nbMenu" title="Notebook options">⋯</button></div>
+    <div class="on-top"><h2>${icon('book')}<span>${esc(nb.name)}</span></h2><a class="btn" href="#/nb/${nb.id}/index" title="Contents and A–Z index of this notebook">${icon('list', 16)} ${lbl('Index')}</a><a class="btn" href="#/nb/${nb.id}/tags" title="Every tagged line in this notebook">${icon('tag', 16)} ${lbl('Tags summary')}</a>${sec.lock && !isSealed(sec) ? `<button id="lockNow" title="Lock this section now">${icon('lock', 16)} ${lbl('Lock')}</button>` : ''}<button id="nbMenu" title="Notebook options">⋯</button></div>
     <div class="on-cols" data-pane="${isSealed(sec) && secId || pageId ? 'page' : secId ? 'pages' : 'secs'}">
       <div class="on-secs" data-rz="secs:120:420"><div class="on-h">Sections <button id="addSec" title="New section (Ctrl+T)">＋</button></div><div id="secList">${secs.map(s => `<div class="on-sec${s === sec ? ' on' : ''}" draggable="true" data-id="${s.id}" style="--c:${s.color}" title="Double-click to rename, right-click for options"><span class="tabc"></span><span class="nm">${esc(s.name)}</span>${s.lock ? `<span class="mut" title="${isSealed(s) ? 'Locked' : 'Unlocked'}">${icon(isSealed(s) ? 'lock' : 'unlock', 13)}</span>` : `<small>${pagesOf(s.id).length || ''}</small>`}</div>`).join('')}</div></div>
       <div class="on-pages" data-rz="pages:170:560">${backLink(`#/nb/${nb.id}`, 'Sections')}<div class="on-h">Pages <button id="addPg" title="New page (Ctrl+N)">＋ Page</button></div><input id="pq" placeholder="Search notebook…"><div id="pgList"></div></div>
@@ -970,12 +992,13 @@ const TB = `<button class="tstyle" data-c="style" title="Text style"><span class
   ${TBI('template', 'Page templates', icon('layout', 17))}${TBI('cite', 'Citations', icon('quote', 17))}<span class="vs"></span>${TBI('removeFormat', 'Clear formatting', icon('clear', 17))}`;
 
 function openEditor(el, note, refresh, base) {
+  commitEdit?.();
   currentNote = note;
   const created = new Date(note.created);
   el.innerHTML = `<div class="etop"><select id="nbSel" title="Move to section">${S.notebooks.map(nb => `<optgroup label="${esc(nb.name)}">${sectionsOf(nb.id).map(s => `<option value="${s.id}"${s.id === note.sectionId ? ' selected' : ''}${isSealed(s) ? ' disabled' : ''}>${esc(s.name)}${s.lock ? ' 🔒' : ''}</option>`).join('')}</optgroup>`).join('')}</select>
     <select id="paperSel" title="Paper style">${PAPERS.map(([v, t]) => `<option value="${v}"${(note.paper || 'blank') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
     <select id="pcSel" title="Page colour">${PCOLORS.map(([v, t]) => `<option value="${v}"${(note.pcolor || 'dark') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
-    <span style="flex:1">Edited ${ago(note.updated)}</span><button id="ttsBtn" title="Read aloud: the selected text, or the whole page">${icon('speaker', 15)}</button><button id="drawBtn" class="tdraw${S.settings.inkRow ? ' on' : ''}" title="Show pen & ink tools (your stylus draws either way in “Stylus draws” mode)">${icon('pen', 15)} Draw</button><button id="expBtn" title="Export as PDF">${icon('download', 15)} Export</button><button id="delNote">${icon('trash', 16)} Delete</button></div>
+    <span style="flex:1">Edited ${ago(note.updated)}</span><button id="ttsBtn" title="Read aloud: the selected text, or the whole page">${icon('speaker', 15)}</button><button id="drawBtn" class="tdraw${S.settings.inkRow ? ' on' : ''}" title="Show pen & ink tools (your stylus draws either way in “Stylus draws” mode)">${icon('pen', 15)} ${lbl('Draw')}</button><button id="expBtn" title="Export as PDF">${icon('download', 15)} ${lbl('Export')}</button><button id="delNote" title="Delete this page">${icon('trash', 16)} ${lbl('Delete')}</button></div>
     <input class="title" id="title" placeholder="Title" value="${esc(note.title)}"><div class="pdate">${created.toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} &nbsp; ${hm(created)}</div><div class="tb etb">${TB}</div><div class="inkrow"${S.settings.inkRow ? '' : ' hidden'}>${inkBar()}</div>
     <div class="bodywrap" id="bw"><div class="body paper-${note.paper || 'blank'} pc-${note.pcolor || 'dark'}" id="body" contenteditable="true" spellcheck="true">${note.html}</div><canvas class="ink"></canvas><div class="imgbar" hidden></div></div><input type="file" id="picIn" accept="image/*" hidden>`;
   const body = $('#body', el), title = $('#title', el);
@@ -991,10 +1014,14 @@ function openEditor(el, note, refresh, base) {
   };
   let fitT; new ResizeObserver(() => { clearTimeout(fitT); fitT = setTimeout(ink.fit, 100); }).observe(body);
   mathGhost(body, $('#bw', el));
-  const touch = () => {
+  let dirty = false, refT;
+  const commit = commitEdit = () => {
+    if (!dirty) return; dirty = false;
     const c = body.cloneNode(true); c.querySelectorAll('.math').forEach(m => { m.textContent = ''; m.removeAttribute('contenteditable'); }); c.querySelectorAll('img.sel').forEach(i => i.classList.remove('sel'));
-    note.html = c.innerHTML; note.updated = Date.now(); save(); refresh();
+    note.html = c.innerHTML;
   };
+  const later = () => { clearTimeout(refT); refT = setTimeout(() => { commit(); if (body.isConnected) refresh(); }, 250); }; // the page list redraws once typing pauses, not per key
+  const touch = () => { dirty = true; note.updated = Date.now(); save(); later(); };
   const insertMath = async (display, range) => {
     const t = await ask(display ? 'Block equation (LaTeX)' : 'Equation (LaTeX)', range?.toString() || '', true);
     body.focus(); if (!t?.trim()) return;
@@ -1003,7 +1030,7 @@ function openEditor(el, note, refresh, base) {
     getSelection().collapse(sp, 1); touch();
   };
   const curRange = () => { const s = getSelection(); return s.rangeCount && body.contains(s.anchorNode) ? s.getRangeAt(0).cloneRange() : null; };
-  title.oninput = () => { note.title = title.value; note.updated = Date.now(); save(); refresh(); };
+  title.oninput = () => { note.title = title.value; note.updated = Date.now(); save(); later(); };
   title.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); body.focus(); } };
   body.oninput = e => { if (e.data === '$') autoMath(); touch(); };
   const blockOf = () => { // the paragraph/heading/list item holding the caret
@@ -1084,7 +1111,7 @@ function openEditor(el, note, refresh, base) {
       return dialog('<h3>Insert table</h3><div class="row" style="flex-wrap:nowrap"><label class="cf" style="flex:1">Rows<input type="number" name="r" min="1" max="50" value="3" required></label><label class="cf" style="flex:1">Columns<input type="number" name="c" min="1" max="12" value="3" required></label></div><label class="syncc"><input type="checkbox" name="h" checked> Header row</label>', d => insertAt(range, tableHTML(+d.r, +d.c, !!d.h)));
     }
     if (c === 'template') return ctxMenu(below(b), [...PAGE_TEMPLATES.map(([n, t, h]) => [n, () => useTemplate(range, h, t)]), ...S.templates.map(t => [esc(t.name), () => useTemplate(range, safeHTML(t.html))]), '-', ['Save this page as a template…', async () => {
-      const n = await ask('Template name', note.title || 'My template'); if (n?.trim()) { S.templates.push({ id: uid(), name: n.trim(), html: safeHTML(note.html) }); save(); toast('Template saved'); }
+      const n = await ask('Template name', note.title || 'My template'); if (n?.trim()) { commit(); S.templates.push({ id: uid(), name: n.trim(), html: safeHTML(note.html) }); save(); toast('Template saved'); }
     }], ...S.templates.map(t => [`Remove “${esc(t.name)}”`, () => { S.templates = S.templates.filter(x => x !== t); save(); }])]);
     if (c === 'cite') {
       const style = S.settings.citeStyle || 'apa', add = h => insertAt(range, h), name = REF_STYLES.find(x => x[0] === style)[1];
@@ -1216,7 +1243,22 @@ function bindTasks(el, rerender) {
     else t.title = e.target.value;
     save(); rerender(); renderSide(view);
   };
-  el.onclick = e => { if (e.target.classList.contains('x')) { S.tasks = S.tasks.filter(x => x.id !== e.target.closest('.task').dataset.id); save(); rerender(); renderSide(view); } };
+  const changed = () => { save(); if (el.isConnected) rerender(); renderSide(view); };
+  const remove = row => { const i = S.tasks.findIndex(x => x.id === row.dataset.id), [t] = S.tasks.splice(i, 1); changed(); toast('Task deleted', () => { S.tasks.splice(i, 0, t); changed(); }); };
+  el.onclick = e => { if (e.target.classList.contains('x')) remove(e.target.closest('.task')); };
+  el.onpointerdown = e => { // finger: swipe right to tick a task, left to delete it. Scrolling up and down stays with the browser, which sends pointercancel
+    const row = e.target.closest('.task'), id = e.pointerId; if (e.pointerType !== 'touch' || !row) return;
+    let dx = 0, on = false;
+    const mv = m => { if (m.pointerId !== id) return; dx = m.clientX - e.clientX; if (!on && Math.abs(dx) < 12) return; on = true; row.style.transform = `translateX(${dx}px)`; };
+    const end = m => {
+      if (m.pointerId !== id) return;
+      removeEventListener('pointermove', mv, true); removeEventListener('pointerup', end, true); removeEventListener('pointercancel', end, true);
+      row.style.transform = ''; if (m.type !== 'pointerup' || !on || Math.abs(dx) < row.offsetWidth * .35) return;
+      if (dx < 0) return remove(row);
+      const t = S.tasks.find(x => x.id === row.dataset.id); t.done = !t.done; changed();
+    };
+    addEventListener('pointermove', mv, true); addEventListener('pointerup', end, true); addEventListener('pointercancel', end, true);
+  };
 }
 const byDue = (a, b) => (a.due || '9999').localeCompare(b.due || '9999') || a.created - b.created;
 function addTaskForm(form, rerender) {
@@ -1227,7 +1269,7 @@ function addTaskForm(form, rerender) {
   };
 }
 function viewTasks() {
-  main.innerHTML = `<div class="page"><h1>Tasks</h1><form id="addT" class="row" style="margin:14px 0"><input name="t" placeholder="Add a task…" style="flex:1" autofocus><input type="date" name="d" value="${today()}" title="Due date (today by default — clear it for no date)"><button class="pri">Add</button></form><div id="tl"></div></div>`;
+  main.innerHTML = `<div class="page"><h1>Tasks</h1><form id="addT" class="row" style="margin:14px 0"><input name="t" placeholder="Add a task…" style="flex:1"${coarsePtr.matches ? '' : ' autofocus'}><input type="date" name="d" value="${today()}" title="Due date (today by default — clear it for no date)"><button class="pri">Add</button></form><div id="tl"></div></div>`;
   const draw = () => {
     const T = today(), g = { Overdue: [], Today: [], Upcoming: [], 'No date': [], Completed: [] };
     for (const t of S.tasks) g[t.done ? 'Completed' : !t.due ? 'No date' : t.due < T ? 'Overdue' : t.due === T ? 'Today' : 'Upcoming'].push(t);
@@ -1343,7 +1385,7 @@ function viewCalendar() {
   const T = today();
   const ym = ymd(calM).slice(0, 7), nEv = S.events.filter(e => e.date.startsWith(ym)).length + S.settings.cals.filter(c => !c.hidden).reduce((a, c) => a + (S.ics[c.id] || []).filter(o => o.date.startsWith(ym)).length, 0), nTk = S.tasks.filter(t => !t.done && t.due?.startsWith(ym)).length;
   main.innerHTML = `<div class="page" style="max-width:1300px"><div class="vhead"><span class="hico">${icon('calendar', 20)}</span><div class="htitle"><h1>${calM.toLocaleDateString(LOC, { month: 'long', year: 'numeric' })}</h1><small>${nEv} event${nEv === 1 ? '' : 's'} · ${nTk} task${nTk === 1 ? '' : 's'} due this month</small></div><span style="flex:1"></span>
-    ${S.settings.cals.length ? `<button id="cs" class="ibtn" title="Sync subscribed calendars">${icon('sync', 16)} Sync</button>` : `<a class="btn ibtn" href="#/settings" title="Add your Google / Outlook / iCloud calendar link">${icon('link', 16)} Connect calendar</a>`}
+    ${S.settings.cals.length ? `<button id="cs" class="ibtn" title="Sync subscribed calendars">${icon('sync', 16)} ${lbl('Sync')}</button>` : `<a class="btn ibtn" href="#/settings" title="Add your Google / Outlook / iCloud calendar link">${icon('link', 16)} ${lbl('Connect calendar')}</a>`}
     <div class="seg"><button id="cp" title="Previous month">${icon('left', 16)}</button><button id="ct" title="Jump to this month">Today</button><button id="cn" title="Next month">${icon('right', 16)}</button></div><button class="pri ibtn" id="ce">${icon('plus', 16)} Event</button></div>
     ${S.settings.cals.length ? `<div class="legend" id="legend">${S.settings.cals.map(c => `<label title="${c.err ? esc(c.err) : 'Show / hide'}"><input type="checkbox" data-cal="${c.id}"${c.hidden ? '' : ' checked'} style="accent-color:${c.color}"><span class="cdot" style="background:${c.color}"></span>${esc(c.name)}${c.err ? ' ⚠' : ''}</label>`).join('')}<a class="btn" href="#/settings" style="font-size:12px;padding:3px 10px">＋ Add calendar</a></div>` : ''}
     <div class="cal" id="cal">${dows().map(d => `<div class="dow">${d}</div>`).join('')}${monthDays(calM).map(d => { const ds = ymd(d); return `<div data-d="${ds}" class="${d.getMonth() !== calM.getMonth() ? 'out' : ''}${ds === T ? ' td' : ''}"><span class="dn">${d.getDate()}</span>${dayItems(ds)}</div>`; }).join('')}</div></div>`;
@@ -1430,7 +1472,7 @@ const WIDGETS = {
     return { title: 'Upcoming', tools: '<small>next 7 days</small>', body: `<section class="box upc">${html || '<p class="mut" style="margin:0">Nothing in the next 7 days.</p>'}</section>`, bind: w => w.querySelector('.upc').onclick = itemClick };
   } },
   files: { name: 'Recent files', col: 0, make: () => ({
-    title: '<a href="#/files">Files ›</a>', tools: '<label class="btn" title="Add PDF, Markdown or PowerPoint">＋ Add<input type="file" accept=".pdf,.md,.markdown,.pptx" multiple hidden></label>',
+    title: '<a href="#/files">Files ›</a>', tools: `<label class="btn" title="Add PDF, Markdown or PowerPoint">${ilbl('plus', '＋ Add')}<input type="file" accept=".pdf,.md,.markdown,.pptx" multiple hidden></label>`,
     body: `<section class="box">${[...S.files].sort((a, b) => b.added - a.added).slice(0, 6).map(f => `<a class="frow" href="#/files/${f.id}"><span class="ftype ${f.type}">${f.type.toUpperCase()}</span><span class="fn">${esc(f.name)}</span>${f.tags.slice(0, 3).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}<small>${ago(f.added)}</small></a>`).join('') || '<p class="mut" style="margin:0">No files yet — add PDFs, Markdown or slides.</p>'}</section>`,
     bind: w => w.querySelector('input[type=file]').onchange = e => addFiles(e.target.files)
   }) },
@@ -1442,7 +1484,7 @@ const WIDGETS = {
   pinned: { name: 'Pinned note', col: 0, make: () => {
     const n = openNotes().find(x => x.id === S.settings.pinned);
     return {
-      title: 'Pinned note', tools: `<select data-pin style="max-width:180px"><option value="">Choose a note…</option>${openNotes().map(x => `<option value="${x.id}"${x === n ? ' selected' : ''}>${esc(x.title || 'Untitled')}</option>`).join('')}</select>${n ? `<a class="btn" href="#/notes/${n.id}">Open</a>` : ''}`,
+      title: 'Pinned note', tools: `<select data-pin style="max-width:180px"><option value="">Choose a note…</option>${openNotes().map(x => `<option value="${x.id}"${x === n ? ' selected' : ''}>${esc(x.title || 'Untitled')}</option>`).join('')}</select>${n ? `<a class="btn" href="#/notes/${n.id}" title="Open">${ilbl('right', 'Open')}</a>` : ''}`,
       body: `<section class="box"><div class="body pinbody"${n ? ' contenteditable="true"' : ''}>${n ? n.html : '<p class="mut">Pick a note to keep it open here — you can edit it in place.</p>'}</div></section>`,
       bind: w => {
         w.querySelector('[data-pin]').onchange = e => { S.settings.pinned = e.target.value; save(); viewHome(); };
@@ -1472,7 +1514,7 @@ const WIDGETS = {
     bind: w => { const el = w.querySelector('.hlist'), draw = () => { el.innerHTML = taskRows(S.tasks.filter(t => !t.done).sort(byDue).slice(0, 10)) || '<p class="mut">Nothing to do</p>'; }; bindTasks(el, draw); addTaskForm(w.querySelector('form'), draw); draw(); }
   }) },
   scratch: { name: 'Scratch pad', col: 1, make: () => ({
-    title: 'Scratch pad', tools: '<button data-s2n>Save as note</button><button data-clr>Clear</button>',
+    title: 'Scratch pad', tools: `<button data-s2n title="Save as note">${ilbl('noteplus', 'Save as note')}</button><button data-clr title="Clear">${ilbl('eraser', 'Clear')}</button>`,
     body: `<section class="box scratch"><textarea placeholder="Start writing…">${esc(S.scratch)}</textarea></section>`,
     bind: w => {
       const sc = w.querySelector('textarea'); sc.oninput = () => { S.scratch = sc.value; save(); };
@@ -1503,7 +1545,7 @@ const WIDGETS = {
   habits: { name: 'Habit tracker', col: 1, make: () => {
     const H = S.habits ||= [], days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - 6 + i); return d; });
     return {
-      title: 'Habits', tools: '<button data-add>＋ Habit</button>',
+      title: 'Habits', tools: `<button data-add title="Add a habit">${ilbl('plus', '＋ Habit')}</button>`,
       body: `<section class="box">${H.length ? `<table class="hab"><tr><th></th>${days.map(d => `<th>${'SMTWTFS'[d.getDay()]}<br><small>${d.getDate()}</small></th>`).join('')}<th></th></tr>${H.map(h => `<tr><td>${esc(h.name)}<br><small>${streak(h)} day streak</small></td>${days.map(d => `<td><input type="checkbox" data-h="${h.id}" data-d="${ymd(d)}"${h.days[ymd(d)] ? ' checked' : ''}></td>`).join('')}<td><button class="x" data-rm="${h.id}" title="Remove">✕</button></td></tr>`).join('')}</table>` : '<p class="mut" style="margin:0">Track daily habits — e.g. “Read 20 pages”, “Gym”, “Review flashcards”.</p>'}</section>`,
       bind: w => {
         const box = w.querySelector('.box');
@@ -1514,7 +1556,7 @@ const WIDGETS = {
     };
   } },
   formulas: { name: 'Formula sheet', col: 1, make: () => ({
-    title: 'Formula sheet', tools: '<button data-add>＋ Formula</button><label class="btn" title="Add a picture or a photo of a formula sheet">＋ Picture<input type="file" accept="image/*" multiple hidden data-pic></label>',
+    title: 'Formula sheet', tools: `<button data-add title="Add a formula">${ilbl('plus', '＋ Formula')}</button><label class="btn" title="Add a picture or a photo of a formula sheet">${ilbl('image', '＋ Picture')}<input type="file" accept="image/*" multiple hidden data-pic></label>`,
     body: `<section class="box fs">${(S.formulas ||= []).map((f, i) => typeof f === 'object' ? `<div class="frm fimg" data-i="${i}" title="Click to view"><img src="${esc(f.img)}" alt=""><span>${esc(f.name || '')}</span><button class="x" data-rm="${i}" title="Remove">✕</button></div>`
       : `<div class="frm" data-i="${i}" title="Click to copy as $LaTeX$"><span class="math" data-tex="${esc(f)}"></span><button class="x" data-rm="${i}" title="Remove">✕</button></div>`).join('') || '<p class="mut" style="margin:0">Pin equations you use often (click one to copy it), or add pictures of formula sheets.</p>'}</section>`,
     bind: w => {
@@ -1530,7 +1572,7 @@ const WIDGETS = {
     }
   }) },
   inkpad: { name: 'Quick ink pad', col: 1, make: () => ({
-    title: 'Ink pad', tools: '<button data-wb title="Turn this sketch into a whiteboard">Save to whiteboard</button>',
+    title: 'Ink pad', tools: `<button data-wb title="Turn this sketch into a whiteboard">${ilbl('pen', 'Save to whiteboard')}</button>`,
     body: `<section class="box" style="padding:0;overflow:hidden"><div class="tb" style="padding:6px 8px">${inkBar()}</div><div class="inkpad"><canvas class="ink"></canvas></div></section>`,
     bind: w => {
       const host = w.querySelector('.inkpad');
@@ -1548,11 +1590,12 @@ const WIDGETS = {
     const b = S.brief, fresh = b?.date === today();
     if (!NATIVE) return { title: 'Daily brief', body: `<section class="box">${DESKTOP_ONLY('The AI daily brief (DeepSeek)')}</section>` };
     return {
-      title: 'Daily brief', tools: `<button data-gen>${fresh ? 'Refresh' : 'Generate'}</button>`,
+      title: 'Daily brief', tools: `<button data-gen title="${fresh ? 'Refresh' : 'Generate'} the brief">${fresh ? ilbl('sync', 'Refresh') : ilbl('sparkle', 'Generate')}</button>`,
       body: `<section class="box"><div class="brief">${fresh ? esc(b.text) : `<p class="mut" style="margin:0">${S.settings.aiKey ? 'Click Generate for a short plan of your day from your tasks and calendar.' : 'Add a DeepSeek key in <a href="#/settings">Settings</a> to get an AI plan for your day.'}</p>`}</div></section>`,
       bind: w => w.querySelector('[data-gen]').onclick = async e => {
+        const btn = e.currentTarget;
         if (!S.settings.aiKey) return location.hash = '#/settings';
-        e.target.textContent = 'Thinking…';
+        btn.textContent = 'Thinking…';
         const T = today(), lines = [...S.tasks.filter(t => !t.done).map(t => `Task: ${t.title}${t.due ? ` (due ${t.due})` : ''}`),
           ...[0, 1, 2].flatMap(i => { const d = new Date(); d.setDate(d.getDate() + i); const ds = ymd(d); return [...S.events.filter(x => x.date === ds), ...icsOn(ds)].map(x => `Event ${ds} ${x.time || 'all day'}: ${x.title}`); })];
         try {
@@ -1560,7 +1603,7 @@ const WIDGETS = {
             { role: 'system', content: 'Write a short, friendly daily brief (max 120 words): top priorities first, then the schedule, then one practical tip. Plain text with short "- " bullet lines.' },
             { role: 'user', content: `Today is ${T}.\n${lines.join('\n') || 'Nothing scheduled.'}` }] });
           S.brief = { date: T, text }; save(); viewHome();
-        } catch (err) { w.querySelector('.brief').textContent = 'Error: ' + errText(err); e.target.textContent = 'Retry'; }
+        } catch (err) { w.querySelector('.brief').textContent = 'Error: ' + errText(err); btn.textContent = 'Retry'; }
       }
     };
   } }
@@ -1575,7 +1618,7 @@ function homeLayout() {
 
 function viewHome() {
   const h = new Date().getHours(), L = homeLayout(), made = {};
-  main.innerHTML = `<div class="home"><div class="row" style="align-items:flex-start"><div style="flex:1"><h1>${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}</h1><p class="mut" style="margin:0">${new Date().toLocaleDateString(LOC, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div>${window.native?.openWidget ? `<button class="btn" id="miniWin" title="A small always-on-top window with your tasks, today and the scratch pad">${icon('fit', 16)} Mini window</button>` : ''}<a class="btn" href="#/settings/widgets">${icon('settings', 16)} Customize</a></div>
+  main.innerHTML = `<div class="home"><div class="row" style="align-items:flex-start"><div style="flex:1"><h1>${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}</h1><p class="mut" style="margin:0">${new Date().toLocaleDateString(LOC, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div>${window.native?.openWidget ? `<button class="btn" id="miniWin" title="A small always-on-top window with your tasks, today and the scratch pad">${icon('fit', 16)} Mini window</button>` : ''}<a class="btn" href="#/settings/widgets" title="Customize">${icon('settings', 16)} ${lbl('Customize')}</a></div>
     <div class="hcols">${L.cols.map((col, ci) => `<div class="hcol" data-col="${ci}">${col.filter(id => WIDGETS[id] && !L.hidden[id]).map(id => {
       const m = made[id] = WIDGETS[id].make();
       return `<div class="widget sz-${L.size[id] || 'fit'}${L.collapsed[id] ? ' shut' : ''}" data-w="${id}"><div class="wh"><span class="grip" draggable="true" title="Drag to move">⠿</span><button class="fold" title="Collapse / expand">${icon('down', 16)}</button><h3>${m.title}</h3>${m.tools || ''}</div><div class="wb">${m.body}</div></div>`;
@@ -1647,16 +1690,17 @@ async function relsOf(zip, part) {
 }
 async function loadPptx(blob) {
   const zip = await JSZip.loadAsync(blob), pres = parseXml(await zip.file('ppt/presentation.xml').async('text')), prels = await relsOf(zip, 'ppt/presentation.xml');
-  const sz = desc(pres, 'p', 'sldSz')[0], cache = {};
-  const part = async p => p && (cache[p] ||= parseXml(await zip.file(p).async('text')));
+  const sz = desc(pres, 'p', 'sldSz')[0], cache = {}, rcache = {};
+  const part = async p => p && zip.file(p) ? (cache[p] ||= parseXml(await zip.file(p).async('text'))) : undefined;
+  const rel = async p => p ? (rcache[p] ||= await relsOf(zip, p)) : {};
+  const find = (rels, t) => Object.values(rels).find(x => x.type.endsWith(t))?.target;
   const slides = [];
   for (const id of desc(pres, 'p', 'sldId')) {
     const path = prels[id.getAttributeNS(NS.r, 'id')]?.target; if (!path || !zip.file(path)) continue;
-    const rels = await relsOf(zip, path), lp = Object.values(rels).find(x => x.type.endsWith('/slideLayout'))?.target;
-    const mp = lp && Object.values(await relsOf(zip, lp)).find(x => x.type.endsWith('/slideMaster'))?.target;
-    slides.push({ path, sldId: id, doc: parseXml(await zip.file(path).async('text')), rels, layout: await part(lp), master: await part(mp), dirty: false });
+    const rels = await relsOf(zip, path), lp = find(rels, '/slideLayout'), lrels = await rel(lp), mp = find(lrels, '/slideMaster'), mrels = await rel(mp);
+    slides.push({ path, sldId: id, doc: parseXml(await zip.file(path).async('text')), rels, layout: await part(lp), lrels, master: await part(mp), mrels, theme: await part(find(mrels, '/theme')), dirty: false });
   }
-  return { zip, pres, prelsDoc: parseXml(await zip.file('ppt/_rels/presentation.xml.rels').async('text')), cx: +sz.getAttribute('cx'), cy: +sz.getAttribute('cy'), slides };
+  return { zip, pres, urls: {}, prelsDoc: parseXml(await zip.file('ppt/_rels/presentation.xml.rels').async('text')), cx: +sz.getAttribute('cx'), cy: +sz.getAttribute('cy'), slides };
 }
 const ser = d => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + new XMLSerializer().serializeToString(d).replace(/^<\?xml[^>]*\?>\s*/, '');
 const relsPathOf = p => p.replace(/([^/]+)$/, '_rels/$1.rels');
@@ -1737,18 +1781,75 @@ const pptxText = deck => deck.slides.map((s, i) => `[Slide ${i + 1}] ` + desc(s.
 function xfrmOf(el) {
   const x = kid(kid(el, 'p', 'spPr') || kid(el, 'p', 'grpSpPr'), 'a', 'xfrm') || kid(el, 'p', 'xfrm');
   const off = kid(x, 'a', 'off'), ext = kid(x, 'a', 'ext');
-  return off && ext ? { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy'), chOff: kid(x, 'a', 'chOff'), chExt: kid(x, 'a', 'chExt') } : null;
+  return off && ext ? { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy'), chOff: kid(x, 'a', 'chOff'), chExt: kid(x, 'a', 'chExt'), rot: +x.getAttribute('rot') / 60000 || 0, flipH: x.getAttribute('flipH') === '1', flipV: x.getAttribute('flipV') === '1' } : null;
 }
 const phOf = el => desc(el.firstElementChild, 'p', 'ph')[0];
-function inherited(slide, ph) { // placeholders without their own position take it from the layout, then the master
-  if (!ph) return null;
-  const type = ph.getAttribute('type') || 'body', idx = ph.getAttribute('idx'), alias = { ctrTitle: 'title', subTitle: 'body' };
-  for (const d of [slide.layout, slide.master]) {
+const phMatches = (slide, ph) => { // the layout's, then the master's, version of a placeholder: position and text styles come from there
+  if (!ph) return [];
+  const type = ph.getAttribute('type') || 'body', idx = ph.getAttribute('idx'), alias = { ctrTitle: 'title', subTitle: 'body', obj: 'body' };
+  return [slide.layout, slide.master].map((d, i) => {
     const sps = desc(d, 'p', 'sp').filter(phOf);
-    const m = sps.find(sp => idx != null && phOf(sp).getAttribute('idx') === idx) || sps.find(sp => [type, alias[type]].includes(phOf(sp).getAttribute('type') || 'body'));
-    const x = m && xfrmOf(m); if (x) return x;
+    return (i === 0 && idx != null && sps.find(sp => phOf(sp).getAttribute('idx') === idx)) || sps.find(sp => [type, alias[type]].includes(phOf(sp).getAttribute('type') || 'body'));
+  }).filter(Boolean);
+};
+const inherited = (slide, ph) => phMatches(slide, ph).map(xfrmOf).find(Boolean) || null;
+/* colours: theme scheme + clrMap, with the lumMod/lumOff/tint/shade/alpha tweaks PowerPoint themes lean on */
+function schemeOf(s) {
+  if (s.clr) return s.clr;
+  const out = {}, map = kid(s.master?.documentElement, 'p', 'clrMap');
+  for (const c of desc(s.theme, 'a', 'clrScheme')[0]?.children || []) { const v = c.firstElementChild; out[c.localName] = v?.getAttribute('lastClr') || v?.getAttribute('val'); }
+  for (const [k, d] of Object.entries({ bg1: 'lt1', tx1: 'dk1', bg2: 'lt2', tx2: 'dk2' })) out[k] = out[map?.getAttribute(k) || d];
+  return s.clr = out;
+}
+function colorOf(s, el, ph) { // el holds a colour child (solidFill, gs, fillRef, buClr…); ph fills in 'phClr'
+  const c = el && [...el.children].find(n => /Clr$/.test(n.localName)); if (!c) return null;
+  const v = c.getAttribute('val');
+  if (c.localName === 'prstClr') return v;
+  let hex = c.localName === 'schemeClr' ? (v === 'phClr' ? ph : schemeOf(s)[v]) : c.localName === 'sysClr' ? c.getAttribute('lastClr') || (v === 'window' ? 'FFFFFF' : '000000') : v;
+  if (!hex) return null;
+  let [r, g, b] = hex.startsWith('rgba(') ? hex.match(/[\d.]+/g).slice(0, 3).map(x => x / 255) : [0, 2, 4].map(i => parseInt(hex.replace('#', '').slice(i, i + 2), 16) / 255), a = 1;
+  if ([r, g, b].some(isNaN)) return null;
+  const mod = n => { const m = kid(c, 'a', n); return m ? +m.getAttribute('val') / 1e5 : null; };
+  const lm = mod('lumMod'), lo = mod('lumOff'), ti = mod('tint'), sh = mod('shade');
+  if (ti != null) [r, g, b] = [r, g, b].map(x => x + (1 - x) * (1 - ti));
+  if (sh != null) [r, g, b] = [r, g, b].map(x => x * sh);
+  if (lm != null || lo != null) { // via HSL lightness
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b); let h = 0, sat = 0, l = (mx + mn) / 2;
+    if (mx !== mn) { const d = mx - mn; sat = l > .5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h /= 6; }
+    l = Math.min(1, Math.max(0, l * (lm ?? 1) + (lo ?? 0)));
+    const q = l < .5 ? l * (1 + sat) : l + sat - l * sat, p2 = 2 * l - q;
+    const f = t => { t = (t + 1) % 1; return t < 1 / 6 ? p2 + (q - p2) * 6 * t : t < .5 ? q : t < 2 / 3 ? p2 + (q - p2) * (2 / 3 - t) * 6 : p2; };
+    [r, g, b] = sat ? [f(h + 1 / 3), f(h), f(h - 1 / 3)] : [l, l, l];
   }
-  return null;
+  a = mod('alpha') ?? 1;
+  return `rgba(${[r, g, b].map(x => Math.round(x * 255)).join(',')},${a})`;
+}
+const imgUrl = (deck, rels, blip) => { // blob URL for an embedded picture, made once per deck
+  const t = rels?.[blip?.getAttributeNS(NS.r, 'embed')], f = t && !t.external && deck.zip.file(t.target);
+  return f ? (deck.urls[t.target] ||= f.async('blob').then(b => URL.createObjectURL(/\.svg$/i.test(t.target) ? new Blob([b], { type: 'image/svg+xml' }) : b))) : null;
+};
+function paintFill(el, fill, s, rels, deck, ph) { // fill = solidFill | gradFill | blipFill | noFill element
+  const n = fill?.localName;
+  if (n === 'solidFill') el.style.background = colorOf(s, fill, ph);
+  else if (n === 'gradFill') {
+    const stops = desc(fill, 'a', 'gs').sort((x, y) => x.getAttribute('pos') - y.getAttribute('pos')).map(g => `${colorOf(s, g, ph)} ${+g.getAttribute('pos') / 1000}%`);
+    const lin = kid(fill, 'a', 'lin');
+    if (stops.length) el.style.background = kid(fill, 'a', 'path') ? `radial-gradient(${stops})` : `linear-gradient(${lin ? +lin.getAttribute('ang') / 60000 + 90 : 90}deg,${stops})`;
+  } else if (n === 'blipFill') imgUrl(deck, rels, kid(fill, 'a', 'blip'))?.then(u => el.style.background = kid(fill, 'a', 'tile') ? `url(${u})` : `center/100% 100% no-repeat url(${u})`);
+  return !!n;
+}
+const fillIn = el => el && [...el.children].find(c => /Fill$/.test(c.localName));
+function paintBg(el, s, deck) { // slide, then layout, then master background
+  el.style.background = '#fff';
+  for (const [d, rels] of [[s.doc, s.rels], [s.layout, s.lrels], [s.master, s.mrels]]) {
+    const bg = desc(d, 'p', 'bg')[0]; if (!bg) continue;
+    const pr = kid(bg, 'p', 'bgPr'), ref = kid(bg, 'p', 'bgRef');
+    if (pr) return paintFill(el, fillIn(pr), s, rels, deck);
+    if (ref) { // theme background style, tinted with the ref's colour
+      const idx = +ref.getAttribute('idx'), st = desc(s.theme, 'a', idx > 1000 ? 'bgFillStyleLst' : 'fillStyleLst')[0]?.children[(idx % 1000) - 1], c = colorOf(s, ref);
+      if (!paintFill(el, st, s, s.mrels, deck, c) && c) el.style.background = c; return;
+    }
+  }
 }
 function setParaText(p, text) { // ponytail: edited paragraph keeps its first run's formatting; mixed formatting inside it is flattened
   const doc = p.ownerDocument, runs = kids(p, 'a', 'r');
@@ -1761,52 +1862,158 @@ function setParaText(p, text) { // ponytail: edited paragraph keeps its first ru
   }
   (kid(r, 'a', 't') || r.appendChild(doc.createElementNS(NS.a, 'a:t'))).textContent = text.replace(/\n+/g, ' ');
 }
+const WINGDINGS = { '§': '▪', 'Ø': '➢', 'ü': '✓', 'q': '❑', 'n': '■', 'l': '●', 'Ä': '➢', 'v': '❖', 'Ÿ': '•', 'è': '➔', 'à': '→', 'ä': '➢', 'w': '◆', 'u': '◆' };
+const pick1 = (list, f) => { for (const e of list) { const v = e && f(e); if (v != null && v !== '') return v; } return null; };
+const numFmt = (type, n) => {
+  const roman = n => [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']].reduce((s, [v, r]) => { while (n >= v) { s += r; n -= v; } return s; }, '');
+  let v = /alpha/.test(type) ? String.fromCharCode(96 + ((n - 1) % 26) + 1) : /roman/.test(type) ? roman(n) : String(n);
+  if (/Uc/.test(type)) v = v.toUpperCase();
+  return /ParenBoth/.test(type) ? `(${v})` : /ParenR/.test(type) ? v + ')' : /Plain/.test(type) ? v : v + '.';
+};
+const ARROW = { triangle: 'polygon(50% 0,100% 100%,0 100%)', rtTriangle: 'polygon(0 0,100% 100%,0 100%)', diamond: 'polygon(50% 0,100% 50%,50% 100%,0 50%)', rightArrow: 'polygon(0 25%,65% 25%,65% 0,100% 50%,65% 100%,65% 75%,0 75%)', leftArrow: 'polygon(100% 25%,35% 25%,35% 0,0 50%,35% 100%,35% 75%,100% 75%)', upArrow: 'polygon(25% 100%,25% 35%,0 35%,50% 0,100% 35%,75% 35%,75% 100%)', downArrow: 'polygon(25% 0,25% 65%,0 65%,50% 100%,100% 65%,75% 65%,75% 0)', hexagon: 'polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)', pentagon: 'polygon(0 0,80% 0,100% 50%,80% 100%,0 100%)', chevron: 'polygon(0 0,80% 0,100% 50%,80% 100%,0 100%,20% 50%)' };
+// ponytail: draws what lecture decks use (theme colours, inherited text styles, bullets, backgrounds, master graphics, pictures, tables, lines); SmartArt, charts and custom geometry show as plain boxes
 function renderSlide(deck, s, el, W, onEdit) {
-  const k = W / deck.cx, ptpx = W / (deck.cx / 12700);
+  const k = W / deck.cx, ptpx = W / (deck.cx / 12700), tree = d => desc(d, 'p', 'spTree')[0];
   el.innerHTML = ''; el.style.width = W + 'px'; el.style.height = W * deck.cy / deck.cx + 'px';
-  const bgc = desc(desc(s.doc, 'p', 'bg')[0], 'a', 'srgbClr')[0]?.getAttribute('val'); el.style.background = bgc ? '#' + bgc : '#fff';
-  const para = (p, box, phType) => {
-    const d = document.createElement('div'); d.className = 'pp'; d.contentEditable = 'true';
-    const rPr = kid(kids(p, 'a', 'r')[0], 'a', 'rPr') || kid(p, 'a', 'endParaRPr');
-    const pt = +(rPr?.getAttribute('sz') || 0) / 100 || (/title/i.test(phType || '') ? 40 : phType === 'subTitle' ? 24 : 20);
-    Object.assign(d.style, { fontSize: pt * ptpx + 'px', fontWeight: rPr?.getAttribute('b') === '1' || /title/i.test(phType || '') ? 700 : '', fontStyle: rPr?.getAttribute('i') === '1' ? 'italic' : '', textAlign: { ctr: 'center', r: 'right', just: 'justify' }[kid(p, 'a', 'pPr')?.getAttribute('algn')] || '' });
-    const col = desc(rPr, 'a', 'srgbClr')[0]?.getAttribute('val'); if (col) d.style.color = '#' + col;
-    d.textContent = [...p.children].map(n => n.localName === 'br' ? '\n' : ['r', 'fld'].includes(n.localName) ? desc(n, 'a', 't').map(t => t.textContent).join('') : '').join('');
+  paintBg(el, s, deck);
+  const fonts = { '+mj-lt': desc(desc(s.theme, 'a', 'majorFont')[0], 'a', 'latin')[0]?.getAttribute('typeface'), '+mn-lt': desc(desc(s.theme, 'a', 'minorFont')[0], 'a', 'latin')[0]?.getAttribute('typeface') };
+  const textCtx = (node, tx, ctx) => { // where a paragraph's level styles come from, most specific first
+    const ph = ctx.edit ? phOf(node) : null, lists = [kid(tx, 'a', 'lstStyle')], ms = phMatches(s, ph);
+    for (const m of ms) lists.push(kid(kid(m, 'p', 'txBody'), 'a', 'lstStyle'));
+    const t = ph?.getAttribute('type') || 'body';
+    lists.push(ph ? desc(s.master, 'p', /title/i.test(t) ? 'titleStyle' : ['dt', 'ftr', 'sldNum'].includes(t) ? 'otherStyle' : 'bodyStyle')[0] : desc(s.master, 'p', 'otherStyle')[0], desc(deck.pres, 'p', 'defaultTextStyle')[0]);
+    const bps = [kid(tx, 'a', 'bodyPr'), ...ms.map(m => kid(kid(m, 'p', 'txBody'), 'a', 'bodyPr'))];
+    const auto = kid(bps[0], 'a', 'normAutofit'), st = kid(node, 'p', 'style');
+    return {
+      chain: p => { const tag = `lvl${(+kid(p, 'a', 'pPr')?.getAttribute('lvl') || 0) + 1}pPr`; return [kid(p, 'a', 'pPr'), ...lists.map(l => l && kid(l, 'a', tag))].filter(Boolean); },
+      body: n => pick1(bps, e => e.getAttribute(n)),
+      scale: (+auto?.getAttribute('fontScale') || 1e5) / 1e5, lnRed: (+auto?.getAttribute('lnSpcReduction') || 0) / 1e5,
+      color: colorOf(s, kid(st, 'a', 'fontRef')) || '#' + (schemeOf(s).tx1 || '000'), edit: ctx.edit, num: 0,
+    };
+  };
+  const runStyle = (rPr, ch, tc) => {
+    const rc = [rPr, ...ch.map(e => kid(e, 'a', 'defRPr'))], g = n => pick1(rc, e => e.getAttribute(n));
+    const base = +g('baseline') || 0, face = pick1(rc, e => kid(e, 'a', 'latin')?.getAttribute('typeface')), f = fonts[face] || face;
+    const pt = (+g('sz') || 1800) / 100 * tc.scale * (base ? .65 : 1), u = g('u'), strike = g('strike');
+    return { pt, css: { fontSize: pt * ptpx + 'px', fontWeight: g('b') === '1' ? 700 : 400, fontStyle: g('i') === '1' ? 'italic' : 'normal', textDecoration: u && u !== 'none' ? 'underline' : strike && strike !== 'noStrike' ? 'line-through' : '', color: pick1(rc, e => colorOf(s, kid(e, 'a', 'solidFill'))) || tc.color, fontFamily: f ? `"${f}",Calibri,Carlito,"Segoe UI",sans-serif` : '', verticalAlign: base > 0 ? 'super' : base < 0 ? 'sub' : '', textTransform: g('cap') === 'all' ? 'uppercase' : '', background: pick1(rc, e => colorOf(s, kid(e, 'a', 'highlight'))) || '' } };
+  };
+  const spacing = (sp, pt) => { const pts = desc(sp, 'a', 'spcPts')[0], pct = desc(sp, 'a', 'spcPct')[0]; return pts ? pts.getAttribute('val') / 100 * ptpx : pct ? pct.getAttribute('val') / 1e5 * pt * ptpx : 0; };
+  const para = (p, tc) => {
+    const d = document.createElement('div'); d.className = 'pp'; d.contentEditable = tc.edit ? 'true' : 'false';
+    const ch = tc.chain(p), gp = n => pick1(ch, e => e.getAttribute(n));
+    const runs = [...p.children].filter(n => ['r', 'fld', 'br'].includes(n.localName));
+    const head = runStyle(kid(runs.find(n => n.localName !== 'br'), 'a', 'rPr') || kid(p, 'a', 'endParaRPr'), ch, tc);
+    Object.assign(d.style, head.css, { verticalAlign: '', background: '', textAlign: { ctr: 'center', r: 'right', just: 'justify', dist: 'justify' }[gp('algn')] || '', paddingLeft: (+gp('marL') || 0) * k + 'px', textIndent: (+gp('indent') || 0) * k + 'px' });
+    const ln = pick1(ch, e => kid(e, 'a', 'lnSpc')), lpct = desc(ln, 'a', 'spcPct')[0], lpts = desc(ln, 'a', 'spcPts')[0];
+    d.style.lineHeight = lpts ? lpts.getAttribute('val') / 100 * ptpx + 'px' : 1.2 * (lpct ? lpct.getAttribute('val') / 1e5 : 1) * (1 - tc.lnRed);
+    d.style.marginTop = spacing(pick1(ch, e => kid(e, 'a', 'spcBef')), head.pt) + 'px'; d.style.marginBottom = spacing(pick1(ch, e => kid(e, 'a', 'spcAft')), head.pt) + 'px';
+    for (const n of runs) {
+      if (n.localName === 'br') { d.append('\n'); continue; }
+      const sp = document.createElement('span'); Object.assign(sp.style, runStyle(kid(n, 'a', 'rPr'), ch, tc).css);
+      sp.textContent = desc(n, 'a', 't').map(t => t.textContent).join(''); d.append(sp);
+    }
+    const bu = pick1(ch, e => kid(e, 'a', 'buNone') || kid(e, 'a', 'buChar') || kid(e, 'a', 'buAutoNum') || kid(e, 'a', 'buBlip'));
+    if (d.textContent.trim() && bu && bu.localName !== 'buNone') {
+      const face = pick1(ch, e => kid(e, 'a', 'buFont')?.getAttribute('typeface')) || '', c = bu.getAttribute('char') || '•';
+      tc.num = bu.localName === 'buAutoNum' ? (tc.num || +bu.getAttribute('startAt') || 1) : 0;
+      d.dataset.bu = bu.localName === 'buAutoNum' ? numFmt(bu.getAttribute('type') || '', tc.num++) : /wingdings|symbol/i.test(face) ? WINGDINGS[c] || '•' : c;
+      d.style.setProperty('--bw', Math.max(0, -(+gp('indent') || 0)) * k + 'px');
+      const bc = pick1(ch, e => colorOf(s, kid(e, 'a', 'buClr'))); if (bc) d.style.setProperty('--buc', bc);
+    } else tc.num = 0;
+    if (!tc.edit) return d;
     d.oninput = () => { setParaText(p, d.innerText); s.dirty = true; onEdit(); };
     d.onkeydown = e => { // Enter splits into a new paragraph
       if (e.key !== 'Enter') return; e.preventDefault();
       const r = getSelection().getRangeAt(0), pre = document.createRange(); pre.selectNodeContents(d); pre.setEnd(r.startContainer, r.startOffset);
       const before = pre.toString(), after = d.textContent.slice(before.length), np = p.cloneNode(true);
       setParaText(p, before); setParaText(np, after); p.after(np); d.textContent = before;
-      const nd = para(np, box, phType); d.after(nd); nd.focus(); s.dirty = true; onEdit();
+      const nd = para(np, tc); d.after(nd); nd.focus(); s.dirty = true; onEdit();
     };
     return d;
   };
-  const walk = (parent, map) => {
-    for (const node of parent.children) {
+  const text = (box, node, tx, ctx) => {
+    const tc = textCtx(node, tx, ctx), anchor = tc.body('anchor'), ins = (n, d) => (tc.body(n) ?? d) * k + 'px';
+    box.style.padding = `${ins('tIns', 45720)} ${ins('rIns', 91440)} ${ins('bIns', 45720)} ${ins('lIns', 91440)}`;
+    if (anchor === 'ctr' || anchor === 'b') Object.assign(box.style, { display: 'flex', flexDirection: 'column', justifyContent: anchor === 'b' ? 'flex-end' : 'center' });
+    for (const p of kids(tx, 'a', 'p')) box.append(para(p, tc));
+  };
+  const line = (box, node, r, spPr, st) => {
+    const lnEl = kid(spPr, 'a', 'ln'); if (kid(lnEl, 'a', 'noFill')) return;
+    const c = colorOf(s, kid(lnEl, 'a', 'solidFill')) || colorOf(s, kid(st, 'a', 'lnRef')) || '#000', w = Math.max(1, (+lnEl?.getAttribute('w') || 12700) * k);
+    const [x1, x2] = r.flipH ? [r.w * k, 0] : [0, r.w * k], [y1, y2] = r.flipV ? [r.h * k, 0] : [0, r.h * k], head = e => !!e?.getAttribute('type') && e.getAttribute('type') !== 'none';
+    const id = 'a' + Math.random().toString(36).slice(2), mk = `<marker id="${id}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`;
+    box.innerHTML = `<svg width="${Math.max(1, r.w * k)}" height="${Math.max(1, r.h * k)}" style="overflow:visible;position:absolute;inset:0"><defs>${mk}</defs><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}"${kid(lnEl, 'a', 'prstDash') ? ` stroke-dasharray="${w * 3} ${w * 2}"` : ''}${head(kid(lnEl, 'a', 'tailEnd')) ? ` marker-end="url(#${id})"` : ''}${head(kid(lnEl, 'a', 'headEnd')) ? ` marker-start="url(#${id})"` : ''}/></svg>`;
+  };
+  const table = (box, node, ctx) => {
+    const tbl = desc(node, 'a', 'tbl')[0], t = document.createElement('table'); t.className = 'ptbl';
+    t.innerHTML = `<colgroup>${desc(tbl, 'a', 'gridCol').map(c => `<col style="width:${c.getAttribute('w') * k}px">`).join('')}</colgroup>`;
+    for (const tr of kids(tbl, 'a', 'tr')) {
+      const row = t.insertRow(); row.style.height = tr.getAttribute('h') * k + 'px';
+      for (const tc of kids(tr, 'a', 'tc')) {
+        if (tc.getAttribute('hMerge') === '1' || tc.getAttribute('vMerge') === '1') continue;
+        const td = row.insertCell(); td.colSpan = +tc.getAttribute('gridSpan') || 1; td.rowSpan = +tc.getAttribute('rowSpan') || 1;
+        paintFill(td, fillIn(kid(tc, 'a', 'tcPr')), s, ctx.rels, deck);
+        text(td, node, kid(tc, 'a', 'txBody'), ctx);
+      }
+    }
+    box.append(t);
+  };
+  const walk = (parent, map, ctx) => {
+    for (let node of parent.children) {
+      if (node.localName === 'AlternateContent') node = [...node.children].pop()?.firstElementChild || node; // the Fallback: equations and new shape types ship a picture there
       const ln = node.localName;
       if (ln === 'grpSp') {
         const g = xfrmOf(node); let m = map;
-        if (g?.chOff && g.chExt) { const ox = +g.chOff.getAttribute('x'), oy = +g.chOff.getAttribute('y'), sx = g.w / (+g.chExt.getAttribute('cx') || 1), sy = g.h / (+g.chExt.getAttribute('cy') || 1); m = r => map({ x: g.x + (r.x - ox) * sx, y: g.y + (r.y - oy) * sy, w: r.w * sx, h: r.h * sy }); }
-        walk(node, m); continue;
+        if (g?.chOff && g.chExt) { const ox = +g.chOff.getAttribute('x'), oy = +g.chOff.getAttribute('y'), sx = g.w / (+g.chExt.getAttribute('cx') || 1), sy = g.h / (+g.chExt.getAttribute('cy') || 1); m = r => map({ ...r, x: g.x + (r.x - ox) * sx, y: g.y + (r.y - oy) * sy, w: r.w * sx, h: r.h * sy }); }
+        walk(node, m, ctx); continue;
       }
-      if (!['sp', 'pic', 'graphicFrame', 'cxnSp'].includes(ln)) continue;
+      if (!['sp', 'pic', 'graphicFrame', 'cxnSp'].includes(ln) || (!ctx.edit && phOf(node))) continue; // a layout's own placeholders are only prompts
       let r = xfrmOf(node) || inherited(s, phOf(node)); if (!r) continue; r = map(r);
-      const box = document.createElement('div'); box.className = 'shp'; box._node = node;
+      const box = document.createElement('div'); box.className = 'shp' + (ctx.edit ? '' : ' mst'); if (ctx.edit) box._node = node;
       Object.assign(box.style, { left: r.x * k + 'px', top: r.y * k + 'px', width: r.w * k + 'px', height: r.h * k + 'px' });
-      const fc = kid(kid(kid(node, 'p', 'spPr'), 'a', 'solidFill'), 'a', 'srgbClr')?.getAttribute('val'); if (fc && ln !== 'pic') box.style.background = '#' + fc;
+      if (r.rot) box.style.transform = `rotate(${r.rot}deg)`;
+      const spPr = kid(node, 'p', 'spPr'), st = kid(node, 'p', 'style'), geom = kid(spPr, 'a', 'prstGeom')?.getAttribute('prst');
+      if (ln === 'cxnSp' || /^(line|straightConnector1)$/.test(geom || '')) { line(box, node, r, spPr, st); el.append(box); continue; }
       if (ln === 'pic') {
-        const t = s.rels[desc(node, 'a', 'blip')[0]?.getAttributeNS(NS.r, 'embed')], f = t && !t.external && deck.zip.file(t.target);
-        if (f) { const img = document.createElement('img'); f.async('blob').then(b => img.src = URL.createObjectURL(b)); box.append(img); }
+        box.classList.add('pic');
+        const bf = kid(node, 'p', 'blipFill'), sr = kid(bf, 'a', 'srcRect'), [l, t, rr, b] = ['l', 't', 'r', 'b'].map(a => (+sr?.getAttribute(a) || 0) / 1e5);
+        const img = document.createElement('img'); img.alt = ''; img.draggable = false;
+        Object.assign(img.style, { position: 'absolute', width: 100 / (1 - l - rr) + '%', height: 100 / (1 - t - b) + '%', left: -l / (1 - l - rr) * 100 + '%', top: -t / (1 - t - b) * 100 + '%', transform: `scale(${r.flipH ? -1 : 1},${r.flipV ? -1 : 1})` });
+        imgUrl(deck, ctx.rels, kid(bf, 'a', 'blip'))?.then(u => img.src = u); box.append(img);
+        const media = ctx.rels[node.getElementsByTagNameNS('http://schemas.microsoft.com/office/powerpoint/2010/main', 'media')[0]?.getAttributeNS(NS.r, 'embed')];
+        if (media && !media.external && deck.zip.file(media.target)) { // embedded video: play it in place on click
+          const b = document.createElement('button'); b.className = 'pplay'; b.title = 'Play video'; b.innerHTML = '▶';
+          b.onclick = async () => { const v = document.createElement('video'); v.controls = v.autoplay = true; v.src = URL.createObjectURL(await deck.zip.file(media.target).async('blob')); v.className = 'pvid'; box.replaceChildren(v); };
+          box.append(b);
+        }
+      } else {
+        const own = fillIn(spPr), fr = kid(st, 'a', 'fillRef');
+        if (own) paintFill(box, own, s, ctx.rels, deck);
+        else if (fr && +fr.getAttribute('idx')) paintFill(box, desc(s.theme, 'a', 'fillStyleLst')[0]?.children[+fr.getAttribute('idx') - 1], s, ctx.rels, deck, colorOf(s, fr));
+        const lnEl = kid(spPr, 'a', 'ln'), lr = kid(st, 'a', 'lnRef'), lc = !kid(lnEl, 'a', 'noFill') && (colorOf(s, kid(lnEl, 'a', 'solidFill')) || (lr && +lr.getAttribute('idx') ? colorOf(s, lr) : null));
+        if (lc) box.style.border = `${Math.max(1, (+lnEl?.getAttribute('w') || 12700) * k)}px ${kid(lnEl, 'a', 'prstDash') && kid(lnEl, 'a', 'prstDash').getAttribute('val') !== 'solid' ? 'dashed' : 'solid'} ${lc}`;
+        if (geom === 'ellipse') box.style.borderRadius = '50%';
+        else if (/^round/.test(geom || '')) box.style.borderRadius = Math.min(r.w, r.h) * k * .17 + 'px';
+        else if (ARROW[geom]) box.style.clipPath = ARROW[geom];
       }
-      const bodies = ln === 'graphicFrame' ? desc(node, 'a', 'txBody') : kids(node, 'p', 'txBody'); // tables are shown as their cell text
-      const anchor = kid(bodies[0], 'a', 'bodyPr')?.getAttribute('anchor'), phType = phOf(node)?.getAttribute('type');
-      if (anchor === 'ctr' || anchor === 'b' || /title/i.test(phType || '')) Object.assign(box.style, { display: 'flex', flexDirection: 'column', justifyContent: anchor === 'b' ? 'flex-end' : 'center' });
-      for (const tx of bodies) for (const p of kids(tx, 'a', 'p')) box.append(para(p, box, phType));
+      if (ln === 'graphicFrame') desc(node, 'a', 'tbl')[0] ? table(box, node, ctx) : desc(node, 'a', 'txBody').forEach(tx => text(box, node, tx, ctx));
+      else { const tx = kid(node, 'p', 'txBody'); if (tx) text(box, node, tx, ctx); }
       el.append(box);
     }
   };
-  walk(desc(s.doc, 'p', 'spTree')[0], r => r);
+  const id = r => r, showM = s.doc.documentElement.getAttribute('showMasterSp') !== '0';
+  if (showM && s.layout?.documentElement.getAttribute('showMasterSp') !== '0' && s.master) walk(tree(s.master), id, { rels: s.mrels });
+  if (showM && s.layout) walk(tree(s.layout), id, { rels: s.lrels });
+  walk(tree(s.doc), id, { rels: s.rels, edit: true });
+  fitText(el);
+}
+// a device without the deck's fonts (Calibri, Cambria… on Android/iPad) draws wider text: shrink a box's text until it fits the box PowerPoint sized for it
+function fitText(el) {
+  const boxes = [...el.querySelectorAll('.shp:not(.pic)')].filter(b => b.querySelector('.pp') && !b.querySelector('table'));
+  for (let pass = 0; pass < 6; pass++) {
+    const over = boxes.filter(b => b.scrollHeight > b.clientHeight + 2); if (!over.length) return;
+    for (const b of over) b.querySelectorAll('.pp, .pp span').forEach(n => n.style.fontSize = parseFloat(n.style.fontSize) * .92 + 'px');
+  }
 }
 function addTextBox(deck, s, o = { x: .25, y: .44, w: .5, h: .12, sz: 2400, text: 'New text' }) { // o: position/size as fractions of the slide
   const tree = desc(s.doc, 'p', 'spTree')[0], id = Math.max(1, ...desc(s.doc, 'p', 'cNvPr').map(n => +n.getAttribute('id') || 0)) + 1;
@@ -1837,7 +2044,7 @@ function viewFiles(id) {
       let snip = '';
       if (q && f.text) { const i = f.text.toLowerCase().indexOf(q); if (i >= 0) snip = esc(f.text.slice(Math.max(0, i - 50), i)) + '<mark>' + esc(f.text.slice(i, i + q.length)) + '</mark>' + esc(f.text.slice(i + q.length, i + q.length + 80)); }
       return `<div class="item${f === sel ? ' on' : ''}" data-id="${f.id}"><b><span class="ftype ${f.type}">${f.type.toUpperCase()}</span> ${esc(f.name)}</b>${snip ? `<p>…${snip}…</p>` : ''}<div class="tags">${f.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div><small>${kb(f.size)} · ${ago(f.added)}</small></div>`;
-    }).join('') || `<p class="mut" style="padding:14px">${S.files.length ? 'No matches.' : 'Drop PDF or Markdown files here, or click Add.'}</p>`;
+    }).join('') || `<p class="mut" style="padding:14px">${S.files.length ? 'No matches.' : 'Drop lecture slides, PDFs or Markdown notes here, or click Add.'}</p>`;
   };
   $('#fq').oninput = e => { fileQ = e.target.value; items(); };
   $('#ftags').onclick = e => { const t = e.target.closest('[data-tag]'); if (t) { fileTag = fileTag === t.dataset.tag ? '' : t.dataset.tag; items(); } };
@@ -1849,27 +2056,28 @@ function viewFiles(id) {
   sp.ondrop = e => { e.preventDefault(); sp.classList.remove('drop'); addFiles(e.dataTransfer.files); };
   items();
   const fv = $('#fv');
-  if (!sel) { fv.innerHTML = `<div class="empty">${icon('files', 40)}<div>Select a file, or drop PDF, .md or .pptx files anywhere here.</div></div>`; return; }
-  fv.innerHTML = `<div class="etop" style="padding:12px 20px"><b style="color:var(--tx);font-size:15px">${esc(sel.name)}</b><span style="flex:1"></span><input id="ftagin" placeholder="tags, comma separated" value="${esc(sel.tags.join(', '))}" style="width:240px"><button id="fdl">Export</button><button id="fdel">${icon('trash', 16)} Delete</button></div><div id="fbody" style="flex:1;display:flex;min-height:0"></div>`;
+  if (!sel) { fv.innerHTML = `<div class="empty">${icon('files', 40)}<div>Open a file, or drop lecture slides (.pptx), PDFs or Markdown notes anywhere here.</div></div>`; return; }
+  fv.innerHTML = `<div class="etop" style="padding:12px 20px"><b style="color:var(--tx);font-size:15px">${esc(sel.name)}</b><span style="flex:1"></span><input id="ftagin" placeholder="tags, comma separated" value="${esc(sel.tags.join(', '))}" style="width:240px"><button id="fdl">Export</button><button id="fdel" title="Delete this file">${icon('trash', 16)} ${lbl('Delete')}</button></div><div id="fbody" style="flex:1;display:flex;min-height:0"></div>`;
   fv.insertAdjacentHTML('afterbegin', backLink('#/files', 'Files'));
   $('#ftagin').onchange = e => { sel.tags = [...new Set(e.target.value.split(',').map(t => t.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))]; save(); items(); };
   $('#fdel').onclick = () => { if (confirm(`Move "${sel.name}" to the trash?`)) { trashFile(sel); location.hash = '#/files'; } };
   if (sel.type === 'md') {
     currentFileText = `File: ${sel.name}\n\n${sel.text}`;
-    $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="mdTts" title="Read aloud">${icon('speaker', 15)} Read</button>${inkBar()}</div><div class="md" id="mdv"></div></div>`;
+    $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="mdTts" title="Read aloud">${icon('speaker', 15)} ${lbl('Read')}</button>${inkBar()}</div><div class="md" id="mdv"></div></div>`;
     const mdv = $('#mdv'); mdv.innerHTML = safeHTML(marked.parse(sel.text)); mathify(mdv);
     mdv.onclick = e => { const a = e.target.closest('a[href]'); if (!a) return; e.preventDefault(); if (/^https?:/.test(a.getAttribute('href'))) openLink(a.href); }; // a link must not replace the app
     $('#mdTts').onclick = e => speak(speakable(mdv), e.currentTarget);
     const cv = document.createElement('canvas'); cv.className = 'ink'; mdv.append(cv);
     attachInk(inkGroup($('#fbody .inkbar')), { host: mdv, canvas: cv, list: () => sel.ink ||= [], save });
     $('#fdl').onclick = () => dl(new Blob([sel.text], { type: 'text/markdown' }), sel.name);
-  } else if (sel.type === 'pptx') idbGet('files', sel.id).then(async blob => {
-    let deck; try { deck = await loadPptx(blob); } catch (e) { $('#fbody').innerHTML = `<div class="empty">Could not open this presentation: ${esc(e.message)}</div>`; return; }
+  } else if (sel.type === 'pptx') { const fbody = $('#fbody'); fbody.innerHTML = `<div class="empty">Opening ${esc(sel.name)}…</div>`; idbGet('files', sel.id).then(async blob => {
+    let deck; try { deck = await loadPptx(blob); } catch (e) { fbody.innerHTML = `<div class="empty">Could not open this presentation: ${esc(e.message)}</div>`; return; }
+    if (!fbody.isConnected) return; // another file was opened while this one loaded
     currentFileText = `Presentation: ${sel.name}\n\n${pptxText(deck)}`;
     $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb">
       <button id="pnew" title="Add a blank slide after the selected one">＋ Slide</button><button id="pdup" title="Duplicate the selected slide">Duplicate</button><button id="prm" title="Delete the selected slide">Delete slide</button><span class="vs"></span>
       <button id="ptb" title="Add a text box to the selected slide">＋ Text box</button><button id="pdel" title="Delete the selected box">Delete box</button><span class="vs"></span>
-      <button id="pstk" title="Add a sticky note to the selected slide" >${icon('sticky', 16)} Sticky</button>${NATIVE ? '<button id="popen" title="Open a copy in PowerPoint (changes made there are not synced back)">Open in PowerPoint</button>' : ''}<small id="pst" style="align-self:center;margin-left:6px">Saved</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
+      <button id="pstk" title="Add a sticky note to the selected slide" >${icon('sticky', 16)} ${lbl('Sticky')}</button>${NATIVE ? '<button id="popen" title="Open a copy in PowerPoint (changes made there are not synced back)">Open in PowerPoint</button>' : ''}<label class="pnav" title="Go to slide"><input id="pgo" type="number" min="1" max="${deck.slides.length}" value="1" inputmode="numeric"> / ${deck.slides.length}</label><small id="pst" style="align-self:center;margin-left:6px">Saved</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
     const deckEl = $('#deck'), g = inkGroup($('#fbody .inkbar')), W = deckWidth(deckEl), H = W * deck.cy / deck.cx, k = W / 1000;
     let saveT2, act = Math.min(pptxAct[sel.id] || 0, deck.slides.length - 1), actBox = null;
     const edited = () => { $('#pst').textContent = 'Saving…'; clearTimeout(saveT2); saveT2 = setTimeout(async () => { await savePptx(sel, deck); $('#pst').textContent = 'Saved'; }, 800); };
@@ -1881,7 +2089,7 @@ function viewFiles(id) {
       wrap.innerHTML = `<span class="num">${i + 1}</span><div class="slide"></div><canvas class="ink"></canvas><div class="stk-layer"></div>`;
       deckEl.append(wrap);
       const slideEl = wrap.querySelector('.slide'); renderSlide(deck, s, slideEl, W, edited);
-      const pick = e => { select(i); const b = e.target.closest?.('.shp'); if (b) { actBox?.classList.remove('act'); actBox = b; b.classList.add('act'); } };
+      const pick = e => { select(i); const b = e.target.closest?.('.shp:not(.mst)'); if (b) { actBox?.classList.remove('act'); actBox = b; b.classList.add('act'); } };
       wrap.addEventListener('focusin', pick); wrap.addEventListener('pointerdown', pick);
       attachInk(g, { host: wrap, canvas: wrap.querySelector('canvas'), list: () => sel.ink[s.path] ||= [], unit: () => k, save, size: () => [W, H] });
       s.rerender = () => renderSlide(deck, s, slideEl, W, edited);
@@ -1889,7 +2097,14 @@ function viewFiles(id) {
       s.stickies();
     });
     select(act); deckEl.scrollTop = pptxScroll[sel.id] || 0;
-    deckEl.onscroll = () => pptxScroll[sel.id] = deckEl.scrollTop;
+    const wraps = deckEl.querySelectorAll('.slidewrap'), pgo = $('#pgo');
+    deckEl.onscroll = () => { // keep the slide counter on the slide in view
+      pptxScroll[sel.id] = deckEl.scrollTop; let i = 0;
+      while (i < wraps.length - 1 && wraps[i + 1].offsetTop - deckEl.scrollTop < deckEl.clientHeight / 2) i++;
+      if (document.activeElement !== pgo) pgo.value = i + 1;
+    };
+    deckEl.onscroll();
+    pgo.onchange = () => wraps[Math.max(1, Math.min(wraps.length, +pgo.value || 1)) - 1].scrollIntoView({ block: 'start' });
     const restructure = async fn => { clearTimeout(saveT2); $('#pst').textContent = 'Saving…'; await fn(); await savePptx(sel, deck); viewFiles(sel.id); };
     $('#pnew').onclick = () => restructure(async () => { await addSlide(deck, act, false); pptxAct[sel.id] = act + 1; });
     $('#pdup').onclick = () => restructure(async () => { await addSlide(deck, act, true); pptxAct[sel.id] = act + 1; });
@@ -1907,7 +2122,7 @@ function viewFiles(id) {
     $('#pdel').onclick = () => { if (!actBox?.isConnected) return alert('Click a box on a slide first.'); actBox._node.remove(); const s = deck.slides[act]; s.dirty = true; s.rerender(); actBox = null; edited(); };
     if (window.native?.openCopy) $('#popen').onclick = async () => { clearTimeout(saveT2); const b = await savePptx(sel, deck); $('#pst').textContent = 'Saved'; window.native.openCopy(sel.name, await b.arrayBuffer()).catch(e => alert(e.message)); };
     $('#fdl').onclick = async () => { clearTimeout(saveT2); dl(await savePptx(sel, deck), sel.name); $('#pst').textContent = 'Saved'; };
-  });
+  }); }
   else idbGet('files', sel.id).then(blob => {
     if (!blob) { $('#fbody').innerHTML = '<div class="empty">File data missing.</div>'; return; }
     $('#fdl').onclick = () => dl(blob, sel.name);
@@ -1931,16 +2146,49 @@ function addSticky(list) {
 async function pdfPages(sel, blob) { // pdf.js pages, each with a pen layer and sticky notes (kept in the app, not in the PDF)
   closePdf(); const run = pdfRun;
   const fb = $('#fbody');
-  const zoom = pdfZoom[sel.id] || 1;
-  fb.innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="pstk" title="Add a sticky note to the selected page">${icon('sticky', 16)} Sticky</button><div class="seg" style="height:30px"><button data-pz="-1" title="Zoom out (Ctrl+−, Ctrl+scroll)">−</button><button data-pz="0" title="Fit width">${Math.round(zoom * 100)}%</button><button data-pz="1" title="Zoom in (Ctrl+=)">+</button></div><button id="pnat" title="Built-in viewer: print, select text">Native viewer</button><small id="pinfo" style="align-self:center;margin-left:6px">Loading…</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
-  $('#pnat').onclick = () => { pdfNative[sel.id] = true; nativePdf(sel, blob); };
-  const setZoom = step => { // re-lays the pages out at the new size, keeping your place
-    const d = $('#deck'), at = d ? d.scrollTop / Math.max(1, d.scrollHeight) : 0;
-    pdfZoom[sel.id] = step === 0 ? 1 : Math.max(.5, Math.min(3, zoom * (step > 0 ? 1.25 : .8)));
-    pdfPages(sel, blob).then(() => { const n = $('#deck'); if (n) n.scrollTop = at * n.scrollHeight; });
+  let zoom = pdfZoom[sel.id] || sel.pdfPos?.z || 1;
+  fb.innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;position:relative"><div class="tb"><button id="pstk" title="Add a sticky note to the selected page">${icon('sticky', 16)} ${lbl('Sticky')}</button><div class="seg" style="height:30px"><button data-pz="-1" title="Zoom out (Ctrl+−, Ctrl+scroll)">−</button><button data-pz="0" title="Fit width">${Math.round(zoom * 100)}%</button><button data-pz="1" title="Zoom in (Ctrl+=)">+</button></div>${CAP ? '' : '<button id="pnat" title="Built-in viewer: print, select text">Native viewer</button>'}<small id="pinfo" style="align-self:center;margin-left:6px">Loading…</small>${inkBar()}</div><div class="deck" id="deck"></div><div class="pgpill off" id="pgpill"></div></div>`;
+  if (!CAP) $('#pnat').onclick = () => { pdfNative[sel.id] = true; nativePdf(sel, blob); };
+  const deckEl = $('#deck'), wraps = [], dpr = devicePixelRatio || 1, clampZoom = z => Math.max(.5, Math.min(3, z));
+  let W = Math.round(deckWidth(deckEl) * zoom), k = W / 1000;
+  const zoomTo = (z, cx = deckEl.clientWidth / 2, cy = deckEl.clientHeight / 2, dx = 0, dy = 0) => { // re-lays the pages out at the new size, keeping (cx, cy) under the fingers or the view centre
+    z = clampZoom(z); const f = z / zoom, x = deckEl.scrollLeft + cx, y = deckEl.scrollTop + cy;
+    zoom = pdfZoom[sel.id] = z; W = Math.round(deckWidth(deckEl) * zoom); k = W / 1000;
+    fb.querySelector('[data-pz="0"]').textContent = Math.round(zoom * 100) + '%';
+    wraps.forEach(w => { w.style.width = W + 'px'; const h = W * w._ratio; w.querySelectorAll('canvas').forEach(c => Object.assign(c.style, { width: W + 'px', height: h + 'px' })); w._stickies(); if (w._live) w._render(); });
+    deckEl.scrollLeft = x * f - cx - dx; deckEl.scrollTop = y * f - cy - dy; keepPlace();
   };
+  // your place in this PDF, and a page counter while the pages move
+  let cur = 0, restored = false, posT, pillT; const pill = $('#pgpill');
+  const keepPlace = () => { if (!restored) return; const pos = { p: cur, y: Math.round((deckEl.scrollTop - wraps[cur].offsetTop) / wraps[cur].offsetHeight * 1000) / 1000, z: zoom }; clearTimeout(posT); posT = setTimeout(() => { sel.pdfPos = pos; save(); }, 800); }; // measured now: by the timer you may have left and the pages have no size
+  deckEl.addEventListener('scroll', () => {
+    if (!wraps.length) return; const mid = deckEl.scrollTop + deckEl.clientHeight / 2;
+    while (cur < wraps.length - 1 && wraps[cur + 1].offsetTop <= mid) cur++;
+    while (cur > 0 && wraps[cur].offsetTop > mid) cur--;
+    pill.textContent = `${cur + 1} / ${pdfTotal}`; pill.classList.remove('off'); clearTimeout(pillT); pillT = setTimeout(() => pill.classList.add('off'), 900);
+    keepPlace();
+  }, { passive: true });
+  let tap = null; // double-tap zooms to the spot, and back out
+  deckEl.addEventListener('pointerup', e => {
+    if (e.pointerType !== 'touch' || pz || inkState.mode === 'draw' || e.target.closest?.('[data-noink]')) return;
+    const again = tap && performance.now() - tap.t < 300 && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 30;
+    tap = again ? null : { t: performance.now(), x: e.clientX, y: e.clientY };
+    if (again) { const r = deckEl.getBoundingClientRect(); zoomTo(zoom > 1.3 ? 1 : 2, e.clientX - r.left, e.clientY - r.top); }
+  }, true);
+  const setZoom = step => zoomTo(step === 0 ? 1 : zoom * (step > 0 ? 1.25 : .8));
+  // two fingers: the deck follows them with a CSS transform (no redraw), the pages re-render at the new size when they lift
+  let pz = null;
+  const spread = ([a, b]) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), middle = ([a, b], r) => [(a.clientX + b.clientX) / 2 - r.left, (a.clientY + b.clientY) / 2 - r.top];
+  deckEl.addEventListener('touchstart', e => { if (e.touches.length !== 2) return; const r = deckEl.getBoundingClientRect(), [x, y] = middle(e.touches, r); pz = { r, d: spread(e.touches), x, y, f: 1, dx: 0, dy: 0 }; pinching = true; deckEl.style.transformOrigin = `${x}px ${y}px`; deckEl.addEventListener('touchmove', pinchMove, { passive: false, capture: true }); }, { passive: true, capture: true });
+  const pinchMove = e => { // listening only during a pinch: a blocking touchmove would hold back one-finger scrolling
+    if (!pz || e.touches.length < 2) return; if (e.cancelable) e.preventDefault();
+    const [x, y] = middle(e.touches, pz.r); pz.f = clampZoom(zoom * spread(e.touches) / pz.d) / zoom; pz.dx = x - pz.x; pz.dy = y - pz.y;
+    deckEl.style.transform = `translate(${pz.dx}px,${pz.dy}px) scale(${pz.f})`;
+  };
+  const pinchEnd = e => { if (!pz || e.touches.length >= 2) return; const p = pz; pz = null; pinching = false; deckEl.style.transform = ''; deckEl.removeEventListener('touchmove', pinchMove, true); if (Math.abs(p.f - 1) > .02) zoomTo(zoom * p.f, p.x, p.y, p.dx, p.dy); };
+  deckEl.addEventListener('touchend', pinchEnd, true); deckEl.addEventListener('touchcancel', pinchEnd, true);
   fb.querySelector('.seg').onclick = e => { const b = e.target.closest('[data-pz]'); if (b) setZoom(+b.dataset.pz); };
-  let wheelT; fb.onwheel = e => { if (!e.ctrlKey) return; e.preventDefault(); e.stopPropagation(); clearTimeout(wheelT); wheelT = setTimeout(() => setZoom(e.deltaY < 0 ? 1 : -1), 120); }; // property, not addEventListener: #fbody outlives re-renders
+  let pdfTotal = 0, wheelT; fb.onwheel = e => { if (!e.ctrlKey) return; e.preventDefault(); e.stopPropagation(); clearTimeout(wheelT); wheelT = setTimeout(() => setZoom(e.deltaY < 0 ? 1 : -1), 120); }; // property, not addEventListener: #fbody outlives re-renders
   viewKey = e => { if ((e.ctrlKey || e.metaKey) && ['=', '+', '-', '0'].includes(e.key) && !e.target.closest?.('input,textarea')) { e.preventDefault(); setZoom(e.key === '0' ? 0 : e.key === '-' ? -1 : 1); } };
   let pdf;
   try {
@@ -1950,26 +2198,29 @@ async function pdfPages(sel, blob) { // pdf.js pages, each with a pen layer and 
     pdf = await (openPdf = pdfjs.getDocument({ data })).promise;
   } catch (e) { console.warn('pdf.js unavailable, using the built-in viewer', e); if (run === pdfRun) nativePdf(sel, blob); return; }
   if (run !== pdfRun) return;
-  const deckEl = $('#deck'), g = inkGroup(fb.querySelector('.inkbar')), W = Math.round(deckWidth(deckEl) * zoom), k = W / 1000, dpr = devicePixelRatio || 1;
+  const g = inkGroup(fb.querySelector('.inkbar'));
   sel.ink = Array.isArray(sel.ink) || !sel.ink ? {} : sel.ink; sel.stickies ||= {};
-  let act = 0;
-  const wraps = [], select = i => { act = i; wraps.forEach((w, j) => w.classList.toggle('act', j === i)); };
-  const lazy = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { lazy.unobserve(e.target); e.target._render(); } }), { root: deckEl, rootMargin: '800px 0px' });
+  let act = 0; pdfTotal = pdf.numPages;
+  const resume = Math.min(sel.pdfPos?.p || 0, pdf.numPages - 1);
+  const select = i => { wraps[act]?.classList.remove('act'); act = i; wraps[i].classList.add('act'); };
+  const lazy = new IntersectionObserver(es => es.forEach(e => e.target._show(e.isIntersecting)), { root: deckEl, rootMargin: '600px 0px' }); // only pages near the view hold canvases: two full-size canvases per page would sink a long PDF
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i).catch(() => null); if (run !== pdfRun) return; // left this PDF while its pages were loading
-    const vp = page.getViewport({ scale: 1 }), H = W * vp.height / vp.width, key = 'p' + i;
+    const vp = page.getViewport({ scale: 1 }), H = W * vp.height / vp.width, key = 'p' + i; let task = null;
     const wrap = document.createElement('div'); wrap.className = 'slidewrap'; wrap.style.width = W + 'px';
     wrap.innerHTML = `<span class="num">${i}</span><canvas class="pdfc" style="width:${W}px;height:${H}px"></canvas><canvas class="ink"></canvas><div class="stk-layer"></div>`;
-    deckEl.append(wrap); wraps.push(wrap);
-    wrap._render = () => { const c = wrap.querySelector('.pdfc'), v = page.getViewport({ scale: W / vp.width * dpr }); c.width = v.width; c.height = v.height; page.render({ canvasContext: c.getContext('2d'), viewport: v }).promise.catch(() => {}); }; // cancelled when the document closes
-    lazy.observe(wrap);
+    deckEl.append(wrap); wraps.push(wrap); wrap._ratio = vp.height / vp.width;
+    const pc = wrap.querySelector('.pdfc');
+    wrap._render = () => { task?.cancel(); const v = page.getViewport({ scale: W / vp.width * Math.min(dpr, 2200 / W) }); pc.width = v.width; pc.height = v.height; ink.fit(); task = page.render({ canvasContext: pc.getContext('2d'), viewport: v }); task.promise.catch(() => {}); }; // cancelled when the document closes
+    wrap._show = on => { wrap._live = on; if (on) return wrap._render(); task?.cancel(); pc.width = pc.height = 0; ink.free(); };
     const pick = () => select(i - 1); wrap.addEventListener('pointerdown', pick); wrap.addEventListener('focusin', pick);
-    attachInk(g, { host: wrap, canvas: wrap.querySelector('canvas.ink'), list: () => sel.ink[key] ||= [], unit: () => k, save, size: () => [W, H] });
+    const ink = attachInk(g, { host: wrap, canvas: wrap.querySelector('canvas.ink'), list: () => sel.ink[key] ||= [], unit: () => k, save, size: () => [W, W * wrap._ratio], lazy: true });
     wrap._stickies = () => renderStickies(wrap.querySelector('.stk-layer'), sel.stickies[key] ||= [], k, save);
-    wrap._stickies();
+    wrap._stickies(); lazy.observe(wrap);
+    if (i - 1 === resume) { if (sel.pdfPos) deckEl.scrollTop = wrap.offsetTop + (sel.pdfPos.y || 0) * wrap.offsetHeight; restored = true; }
     if (i === 1) $('#pinfo').textContent = `${pdf.numPages} page${pdf.numPages > 1 ? 's' : ''}`;
   }
-  select(0);
+  select(resume);
   $('#pstk').onclick = () => { const w = wraps[act]; addSticky(sel.stickies['p' + (act + 1)] ||= []); w._stickies(); w.querySelector('.sticky:last-child textarea')?.focus(); };
 }
 
@@ -2062,6 +2313,7 @@ async function newBoard() {
   S.boards.push(b); save(); location.hash = `#/board/${b.id}`;
 }
 
+const fingerDraws = () => S.settings.boardFinger ?? false;
 function viewBoard(id) {
   const b = S.boards.find(x => x.id === id); if (!b) return location.hash = '#/boards';
   boardMigrate(b);
@@ -2071,7 +2323,7 @@ function viewBoard(id) {
       <div class="seg" id="wbBg" title="Background">${[['dots', 'bgdots', 'Dots'], ['grid', 'bggrid', 'Grid'], ['lines', 'bglines', 'Lines'], ['blank', 'bgblank', 'Blank']].map(([v, ic, t]) => `<button data-bg="${v}" title="${t} background">${icon(ic, 16)}</button>`).join('')}</div>
       <button id="wbTheme" class="ibtn" title="Switch canvas colour"></button>
       <div class="seg"><button id="wbUndo" title="Undo (Ctrl+Z)">${icon('undo', 16)}</button><button id="wbRedo" title="Redo (Ctrl+Y)">${icon('redo', 16)}</button></div>
-      <button id="wbPng" class="ibtn" title="Export the whole board as a PNG image">${icon('download', 16)} Export</button><button id="wbDel" class="ibtn sq danger" title="Delete whiteboard">${icon('trash', 16)}</button></div>
+      <button id="wbPng" class="ibtn" title="Export the whole board as a PNG image">${icon('download', 16)} ${lbl('Export')}</button><button id="wbDel" class="ibtn sq danger" title="Delete whiteboard">${icon('trash', 16)}</button></div>
     <div class="wb-stage" id="stage"><canvas id="wbc"></canvas><div class="wb-objs" id="wbo"></div><canvas id="wbl"></canvas>
       <div class="wb-selbox" id="wbsel" hidden><div class="wb-selbar"></div><span class="wb-h" title="Drag to resize"></span></div>
       <div class="wb-tools">
@@ -2083,7 +2335,7 @@ function viewBoard(id) {
       <div class="wb-zoom"><button data-z="out" title="Zoom out (Ctrl+−)">−</button><button data-z="reset" id="wbZl" title="Back to 100%">100%</button><button data-z="in" title="Zoom in (Ctrl+=)">+</button><button data-z="fit" title="Fit everything on screen">${icon('fit', 15)}</button></div>
       <input type="file" id="wbImg" accept="image/*" multiple hidden></div></div>`;
   const stage = $('#stage'), cv = $('#wbc'), ov = $('#wbl'), objs = $('#wbo'), selBox = $('#wbsel'), cx = cv.getContext('2d'), lx = ov.getContext('2d');
-  const dpr = devicePixelRatio || 1, sel = new Set(), boxes = new WeakMap();
+  const dpr = Math.min(devicePixelRatio || 1, 2), sel = new Set(), boxes = new WeakMap();
   let V = b.view ? { ...b.view } : null, W = 0, H = 0, act = null, space = false, raf = 0, clip = null, viewT, thumbT;
   let tool = ['select', 'pen', 'hl', 'eraser', 'text', 'note'].includes(pen.tool) ? pen.tool : 'pen';
   const box = it => it.k === 'ink' ? (boxes.get(it) || (boxes.set(it, inkBox(it)), boxes.get(it))) : itemBox(it);
@@ -2203,7 +2455,7 @@ function viewBoard(id) {
   function syncTools() {
     main.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('on', x.dataset.t === tool));
     main.querySelectorAll('.wb-tools [data-col]').forEach(x => x.classList.toggle('on', x.dataset.col === pen.color));
-    main.querySelector('[data-a=shapes]').classList.toggle('on', inkState.shapes); main.querySelector('[data-a=scratch]').classList.toggle('on', inkState.scratch); main.querySelector('[data-a=finger]').classList.toggle('on', inkState.mode === 'draw');
+    main.querySelector('[data-a=shapes]').classList.toggle('on', inkState.shapes); main.querySelector('[data-a=scratch]').classList.toggle('on', inkState.scratch); main.querySelector('[data-a=finger]').classList.toggle('on', fingerDraws());
     $('#wbTheme').innerHTML = b.dark ? `${icon('sun', 16)} Light` : `${icon('moon', 16)} Dark`;
     main.querySelectorAll('[data-bg]').forEach(x => x.classList.toggle('on', x.dataset.bg === b.bg));
     $('#wbMeta').textContent = `${b.items.length} item${b.items.length === 1 ? '' : 's'} · edited ${ago(b.updated)}`;
@@ -2232,8 +2484,9 @@ function viewBoard(id) {
   }
   const addPt = e => {
     const r = stage.getBoundingClientRect(), list = e.getCoalescedEvents?.();
-    for (const v of list?.length ? list : [e]) { const [x, y] = toW(v.clientX - r.left, v.clientY - r.top); act.s.pts.push(Math.round(x * 10) / 10, Math.round(y * 10) / 10, v.pointerType === 'pen' ? Math.round((v.pressure || .5) * 100) / 100 : .5); }
-    clearLive(); drawStroke(lx, act.s);
+    const P = act.s.pts, from = Math.max(0, P.length - 3);
+    for (const v of list?.length ? list : [e]) { const [x, y] = toW(v.clientX - r.left, v.clientY - r.top); P.push(Math.round(x * 10) / 10, Math.round(y * 10) / 10, v.pointerType === 'pen' ? Math.round((v.pressure || .5) * 100) / 100 : .5); }
+    if (act.s.t === 'hl') { clearLive(); drawStroke(lx, act.s); } else drawStroke(lx, { ...act.s, pts: P.slice(from) }); // only the new segments: redrawing the whole stroke per move lags long strokes (see-through highlighter can't overlap, so it still redraws)
   };
 
   // ---- pointer input: pen/mouse draw, touch pans, two fingers pinch, Space/middle-drag pans
@@ -2249,7 +2502,7 @@ function viewBoard(id) {
     ptrs.set(e.pointerId, [e.clientX, e.clientY]);
     if (ptrs.size === 2) { if (act?.moved || act?.removed?.length) commit(); const [p, q] = [...ptrs.values()]; act = { k: 'pinch', d: Math.hypot(p[0] - q[0], p[1] - q[1]), m: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] }; clearLive(); return; }
     const [sx, sy] = local(e), [wx, wy] = toW(sx, sy);
-    if ((e.pointerType === 'touch' && (inkState.mode !== 'draw' || tool === 'select')) || e.button === 1 || space || e.ctrlKey || (pen.penOnly && e.pointerType === 'mouse' && tool !== 'select')) { act = { k: 'pan', sx: e.clientX, sy: e.clientY, ox: V.ox, oy: V.oy }; stage.classList.add('panning'); return; }
+    if ((e.pointerType === 'touch' && (!fingerDraws() || tool === 'select')) || e.button === 1 || space || e.ctrlKey || (pen.penOnly && e.pointerType === 'mouse' && tool !== 'select')) { act = { k: 'pan', sx: e.clientX, sy: e.clientY, ox: V.ox, oy: V.oy }; stage.classList.add('panning'); return; }
     const objEl = e.target.closest('.wbo');
     if (tool === 'eraser' || e.button === 2 || e.button === 5 || (e.buttons & 32)) { act = { k: 'erase', removed: [] }; eraseAt(wx, wy); return; }
     if (tool === 'pen' || tool === 'hl') { act = { k: 'ink', s: { k: 'ink', t: tool, c: pen.color, w: pen.size / V.z, pts: [] } }; addPt(e); return; }
@@ -2323,7 +2576,7 @@ function viewBoard(id) {
     if (t.dataset.col) { pen.color = t.dataset.col; if (sel.size) recolor(pen.color); else if (!['pen', 'hl', 'text'].includes(tool)) setTool('pen'); syncTools(); }
     if (t.dataset.a === 'img') $('#wbImg').click();
     if (t.dataset.a === 'shapes') { toggleShapes(); syncTools(); }
-    if (t.dataset.a === 'finger') { inkState.mode = inkState.mode === 'draw' ? 'pen' : 'draw'; refreshInkUI(); syncTools(); toast(inkState.mode === 'draw' ? '☝ Finger draws — two fingers pan' : 'One finger pans — pen draws'); }
+    if (t.dataset.a === 'finger') { S.settings.boardFinger = !fingerDraws(); save(); syncTools(); toast(fingerDraws() ? '☝ Finger draws — two fingers pan and zoom' : 'One finger pans — pen draws'); }
     if (t.dataset.a === 'scratch') { inkState.scratch = !inkState.scratch; syncTools(); }
   };
   $('#wbSz').oninput = e => pen.size = +e.target.value;
@@ -2405,7 +2658,8 @@ const THEMES = { // hue/sat build the surfaces and tinted text; acc = buttons, a
   mauve: { name: 'Mauve', sub: 'dusty violet', hue: 295, sat: 16, acc: '#8e5fa8', accH: '#9d6db8', acc2: '#d3abe6' },
   midnight: { name: 'Midnight', sub: 'navy & blue', hue: 222, sat: 32, acc: '#2f6fd6', accH: '#3b7ce6', acc2: '#8db8ff' },
   forest: { name: 'Forest', sub: 'pine & sage', hue: 152, sat: 22, acc: '#2f8f5b', accH: '#38a068', acc2: '#8fd6ae' },
-  mocha: { name: 'Mocha', sub: 'coffee & caramel', hue: 24, sat: 22, acc: '#b0703f', accH: '#c07d4a', acc2: '#e8b48c' }
+  mocha: { name: 'Mocha', sub: 'coffee & caramel', hue: 24, sat: 22, acc: '#b0703f', accH: '#c07d4a', acc2: '#e8b48c' },
+  ocean: { name: 'Ocean', sub: 'deep teal & aqua', hue: 196, sat: 34, acc: '#1b8aa3', accH: '#2299b4', acc2: '#7fd6e8' }
 };
 function themeVars(id) {
   const t = THEMES[id]; if (!t?.acc) return { ...GRAPHITE };
@@ -2426,16 +2680,19 @@ const DESIGNS = {
   roses: { name: 'Roses', size: 320, svg: (c, k) => `<g fill="${c.leaf}" fill-opacity="${.13 * k}" stroke="#fff" stroke-opacity="${.18 * k}" stroke-width="1">${leaf(118, 120, 1, 30)}${leaf(60, 100, .9, 200)}${leaf(262, 226, .8, 60)}${leaf(208, 196, .75, 170)}${leaf(128, 270, .65, -20)}${leaf(36, 196, .5, 120)}</g><g fill="${c.fl}" fill-opacity="${.2 * k}" stroke="#fff" stroke-opacity="${.34 * k}" stroke-width="1.1" stroke-linejoin="round">${rose(88, 92, 1.15, 10)}${rose(240, 205, .85, 40)}${rose(112, 252, .62, -20)}${rose(258, 62, .38, 15)}${rose(40, 186, .34, 60)}${rose(196, 296, .3, 0)}</g>` },
   blossoms: { name: 'Blossoms', size: 280, svg: (c, k) => `<g fill="${c.fl}" fill-opacity="${.22 * k}" stroke="#fff" stroke-opacity="${.34 * k}" stroke-width="1" stroke-linejoin="round">${blossom(70, 70, 1.1, 10)}${blossom(200, 120, .8, 40)}${blossom(110, 200, .9, -15)}${blossom(230, 240, .6, 20)}${blossom(30, 250, .5, 0)}${blossom(250, 30, .45, 30)}${blossom(160, 30, .35, 5)}</g><g fill="${c.fl}" fill-opacity="${.18 * k}" stroke="#fff" stroke-opacity="${.25 * k}" stroke-width=".8">${[[150, 160, 30], [40, 150, -40], [260, 180, 70], [180, 255, 10], [120, 120, 100]].map(([x, y, r]) => `<path transform="translate(${x} ${y}) rotate(${r}) scale(.8)" d="M0 0C-9 -4 -10 -16 -3.5 -20L0 -17L3.5 -20C10 -16 9 -4 0 0Z"/>`).join('')}</g>` },
   leaves: { name: 'Leaves', size: 300, svg: (c, k) => `<g fill="${c.fl}" fill-opacity="${.16 * k}" stroke="#fff" stroke-opacity="${.28 * k}" stroke-width="1.1" stroke-linecap="round">${sprig(20, 80, 1.3, -15)}${sprig(150, 170, 1.1, 25)}${sprig(40, 240, .9, -35)}${sprig(190, 40, .8, 10)}</g>` },
+  doodles: { name: 'Study doodles', size: 360, svg: (c, k) => `<g fill="none" stroke="${c.fl}" stroke-opacity="${.3 * k}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><g transform="translate(40 74) rotate(-32)"><rect y="-6" width="56" height="12" rx="2"/><path d="M56 -6L70 0L56 6M10 -6v12"/></g><g transform="translate(262 70)"><ellipse rx="26" ry="9"/><ellipse rx="26" ry="9" transform="rotate(60)"/><ellipse rx="26" ry="9" transform="rotate(-60)"/><circle r="2.5"/></g><g transform="translate(160 196)"><path d="M0 0C-12 -6 -26 -6 -36 -2V22C-26 18 -12 18 0 24C12 18 26 18 36 22V-2C26 -6 12 -6 0 0ZM0 0V24"/></g><g transform="translate(306 262)"><path d="M-10 6C-18 -2 -16 -20 0 -20C16 -20 18 -2 10 6V12H-10ZM-7 16H7M-5 20H5"/></g><g transform="translate(64 296)"><path d="M-6 -22V-6L-18 16H18L6 -6V-22M-9 -22H9M-12 8H12"/></g><path d="M196 318l10 -12 10 12M206 306v24" /></g><g fill="${c.fl}" fill-opacity="${.3 * k}" font-family="Georgia,serif" font-style="italic"><text x="120" y="60" font-size="22">π</text><text x="30" y="190" font-size="18">E=mc²</text><text x="262" y="180" font-size="24">∑</text><text x="130" y="310" font-size="18">x²</text><text x="312" y="345" font-size="20">√</text></g><g fill="${c.fl}" fill-opacity="${.35 * k}">${sparkle(212, 120, .55)}${sparkle(100, 128, .4)}${sparkle(330, 150, .35)}</g>` },
+  grid: { name: 'Graph paper', size: 120, svg: (c, k) => `<path d="${[0, 24, 48, 72, 96].map(i => `M${i} 0V120M0 ${i}H120`).join('')}" stroke="${c.fl}" stroke-opacity="${.09 * k}" fill="none"/><path d="M0 0V120M0 0H120" stroke="${c.fl}" stroke-opacity="${.2 * k}" fill="none"/>` },
+  dots: { name: 'Dot grid', size: 22, svg: (c, k) => `<circle cx="11" cy="11" r="1.2" fill="${c.fl}" fill-opacity="${.32 * k}"/>` },
   stars: { name: 'Stars', size: 260, svg: (c, k) => `<g fill="${c.fl}" fill-opacity="${.45 * k}">${sparkle(50, 60, 1.1)}${sparkle(190, 40, .6)}${sparkle(140, 150, .9)}${sparkle(40, 200, .5)}${sparkle(220, 210, .75)}${sparkle(100, 235, .35)}</g><g fill="#fff" fill-opacity="${.32 * k}">${[[20, 20, 1.2], [90, 100, .9], [230, 110, 1.3], [170, 220, .8], [60, 140, .7], [120, 20, .9], [250, 170, .7], [10, 110, .8], [200, 160, .6], [140, 90, .5]].map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}"/>`).join('')}</g><path d="M215 236a12 12 0 1 0 12 -18a9 9 0 1 1 -12 18Z" fill="${c.fl}" fill-opacity="${.35 * k}"/>` }
 };
-const PRESETS = [['Rose garden', 'maroon', 'roses'], ['Lavender', 'mauve', 'blossoms'], ['Night sky', 'midnight', 'stars'], ['Woodland', 'forest', 'leaves']];
+const PRESETS = [['Study desk', 'midnight', 'doodles'], ['Graph paper', 'graphite', 'grid'], ['Lagoon', 'ocean', 'dots'], ['Rose garden', 'maroon', 'roses'], ['Lavender', 'mauve', 'blossoms'], ['Night sky', 'midnight', 'stars'], ['Woodland', 'forest', 'leaves']];
 const designURL = (design, v, k = 1) => { const d = DESIGNS[design]; if (!d) return ''; const s = `<svg xmlns="http://www.w3.org/2000/svg" width="${d.size}" height="${d.size}">${d.svg({ fl: v.acc2, leaf: v.t3 }, k)}</svg>`; return `url('data:image/svg+xml,${encodeURIComponent(s)}')`; }; // single quotes: it also goes inside style="…" attributes
-const look = () => S?.settings.look || {};
+const look = () => S?.settings.look || { theme: 'midnight', design: 'doodles' }; // new installs start on the study look
 function applyTheme() {
   const a = look(), v = themeVars(a.theme), root = document.documentElement;
   THEME_KEYS.forEach(k => root.style.setProperty('--' + k, v[k]));
-  const bg = designURL(a.design, v, a.strength ?? 1);
-  document.body.style.backgroundImage = bg; document.body.style.backgroundSize = bg ? `${DESIGNS[a.design].size}px` : '';
+  const tile = designURL(a.design, v, a.strength ?? 1), bg = tile && `${tile},radial-gradient(circle at 0 0,${v.acc2}2e,transparent 45%),radial-gradient(circle at 100% 100%,${v.acc}33,transparent 50%)`; // the tile over a soft glow in two corners
+  document.body.style.backgroundImage = bg; document.body.style.backgroundSize = bg ? `${DESIGNS[a.design].size}px,100% 100%,100% 100%` : '';
   document.body.classList.toggle('patterned', !!bg);
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', v.s0);
   if (document.querySelector('.math')) renderAllMath(); // answers use the theme's highlight colour
@@ -2488,13 +2745,14 @@ function viewSettings(section) {
       <label class="row"><input type="checkbox" data-k="mathText"${S.settings.mathText === false ? '' : ' checked'}> <span><b>In notebook pages</b> <span class="mut">— type “12*4 + 7 =” and the answer appears in grey; Tab, Enter or a tap keeps it. A line like “price = 12” sets a value you can use below. Angles follow the calculator's DEG / RAD setting.</span></span></label></section>
     <section class="box" data-ch="ai"><h3>AI Assistant (DeepSeek)</h3>${NATIVE ? `<p class="mut" style="margin-top:0">Optional. The key is stored only on this computer and is sent only to api.deepseek.com when you use the assistant.</p>
       <div class="row"><input id="key" type="password" placeholder="sk-…" style="flex:1" value="${esc(S.settings.aiKey)}"><select id="model">${['deepseek-chat', 'deepseek-reasoner'].map(m => `<option${m === S.settings.aiModel ? ' selected' : ''}>${m}</option>`).join('')}</select><button class="pri" id="saveKey">Save</button></div>` : DESKTOP_ONLY('The AI assistant')}</section>
-    ${syncSettingsHTML()}${ttsSettingsHTML()}<section class="box" data-ch="general"><h3>About</h3><p class="mut" style="margin-top:0"><span id="ver">LocalNotes</span> · Found a bug? <b>Report a problem</b> copies technical details (version, Windows, screen size, how many pages and files you have, recent errors — never your notes, keys or calendar links). Paste them into your message.</p>
+    ${CAP ? `<section class="box" data-ch="general"><div class="srow" style="border:none;padding:0"><span><b>Reminders</b><small>Tasks at 9:00 on their due day, calendar events 15 minutes before they start.</small></span><label class="switch"><input type="checkbox" id="remOn"${S.settings.reminders === false ? '' : ' checked'}><i></i></label></div></section>` : ''}${syncSettingsHTML()}${ttsSettingsHTML()}<section class="box" data-ch="general"><h3>About</h3><p class="mut" style="margin-top:0"><span id="ver">LocalNotes</span> · Found a bug? <b>Report a problem</b> copies technical details (version, Windows, screen size, how many pages and files you have, recent errors — never your notes, keys or calendar links). Paste them into your message.</p>
       <div class="row"><button id="report">${icon('alert', 16)} Report a problem</button></div></section>
     <section class="box" data-ch="general"><h3>Backup</h3><p class="mut" style="margin-top:0">All data lives inside the app on this computer. Export a backup now and then (Markdown files are included; PDFs stay inside the app — export them from Files).</p>
       <div class="row"><button id="exp">Export backup (.json)</button><label class="btn">Import backup…<input type="file" id="imp" accept=".json" hidden></label></div></section></div></div></div>`;
   const ch = SET_CH.some(c => c[0] === section) ? section : section === 'widgets' ? 'home' : S.settings.setCh || 'general'; S.settings.setCh = ch;
   main.querySelectorAll('[data-ch]').forEach(x => x.tagName === 'A' ? x.classList.toggle('on', x.dataset.ch === ch) : x.hidden = x.dataset.ch !== ch);
   bindAppearance(); bindCalcSettings();
+  if (CAP) $('#remOn').onchange = e => { S.settings.reminders = e.target.checked; save(); };
   $('#widgets').onchange = e => {
     const id = e.target.closest('tr')?.dataset.id, k = e.target.dataset.k; if (!id) return;
     if (k === 'on') L.hidden[id] = !e.target.checked;
@@ -2560,7 +2818,11 @@ const toggleKbd = open => { const k = $('#kbd'); k.hidden = open === undefined ?
 $('#kbdTab').onclick = () => toggleKbd(); $('#kbdClose').onclick = () => toggleKbd(false);
 addEventListener('pointerdown', e => { if (!$('#kbd').hidden && !e.target.closest('#kbd,#kbdTab')) toggleKbd(false); }); // a click / tap outside closes it
 $('#kbdQ').oninput = e => $('#kbdBody').innerHTML = kbdHTML(e.target.value.toLowerCase());
-function toast(msg) { document.querySelector('.toast:not(.upd)')?.remove(); const t = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg }); document.body.append(t); setTimeout(() => t.remove(), 1800); }
+function toast(msg, undo) {
+  document.querySelector('.toast:not(.upd)')?.remove(); const t = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg });
+  if (undo) t.append(Object.assign(document.createElement('button'), { textContent: 'Undo', onclick() { t.remove(); undo(); } }));
+  document.body.append(t); setTimeout(() => t.remove(), undo ? 5000 : 1800);
+}
 const focusSearch = () => openSearch();
 document.addEventListener('keydown', e => {
   if (e.defaultPrevented) return;
@@ -3231,7 +3493,7 @@ $('#aiForm').onsubmit = async e => {
   if (!NATIVE || !S.settings.aiKey) return drawAI();
   e.target.q.value = '';
   aiLog.push({ role: 'user', content: q });
-  const open = currentNote ? `Title: ${currentNote.title}\n\n${plain(currentNote.html)}` : currentFileText;
+  commitEdit?.(); const open = currentNote ? `Title: ${currentNote.title}\n\n${plain(currentNote.html)}` : currentFileText;
   const ctx = $('#aiCtx').checked && open ? `\n\nThe user has this open:\n${open.slice(0, 60000)}` : '';
   const messages = [{ role: 'system', content: 'You are a concise assistant inside a personal notes app. Write math as LaTeX between $...$ or $$...$$.' + ctx }, ...aiLog.filter(m => m.role !== 'sys')];
   const reply = { role: 'assistant', content: '…' }; aiLog.push(reply); drawAI();
@@ -3248,6 +3510,6 @@ if (window.native?.onUpdate) window.native.onUpdate(u => {
   t.onclick = async e => { if (e.target.classList.contains('pri')) { await window.flushNow(); window.native.installUpdate(); } else if (e.target.tagName === 'BUTTON') t.remove(); };
   document.body.append(t);
 });
-load().then(() => { route(); if (IS_WIDGET) bc?.postMessage({ type: 'hello' }); else { syncCals(); startSync(); } }).catch(err => { main.innerHTML = `<div class="page"><h1>Could not open storage</h1><p>${esc(err.message)}</p></div>`; });
+load().then(() => { route(); if (IS_WIDGET) bc?.postMessage({ type: 'hello' }); else { syncCals(); startSync(); capStart(); } }).catch(err => { main.innerHTML = `<div class="page"><h1>Could not open storage</h1><p>${esc(err.message)}</p></div>`; });
 // katex.min.js is deferred, so it always loads after this file
 document.getElementById('katexJs').addEventListener('load', renderAllMath);

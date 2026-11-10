@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="LocalNotes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: blob:; connect-src 'self' https: data: blob:; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: blob:; connect-src 'self' https: data: blob:; worker-src 'self' blob:; frame-src 'self' blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>LocalNotes</title>
 <link rel="stylesheet" href="./lib/katex/dist/katex.min.css">
@@ -174,7 +174,7 @@ body[data-ink="draw"] .inkhost{cursor:crosshair}
 .newc{align-items:center;justify-content:center;font-size:15px;text-align:center;gap:10px}
 .newc .dot{width:44px;height:44px;border-radius:50%;background:var(--acc);display:grid;place-items:center;color:var(--t1)}
 .scratch{padding:0;background:none;border:none}
-.scratch textarea{width:100%;height:260px;resize:vertical;background:#3a3618;border-color:#4a4520;border-radius:12px;padding:12px;line-height:1.6;display:block}
+.scratch textarea{width:100%;height:260px;resize:vertical;background:color-mix(in srgb,var(--acc2) 9%,var(--s2));border-color:color-mix(in srgb,var(--acc2) 22%,var(--s3));border-radius:12px;padding:12px;line-height:1.6;display:block}
 .wh{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .wh h3{margin:0;flex:1}
 
@@ -219,16 +219,22 @@ body[data-ink="draw"] .inkhost{cursor:crosshair}
 .md{flex:1;overflow:auto;overflow-x:hidden;padding:20px 24px 80px;font-size:15px;line-height:1.7;position:relative}
 .md>*:not(canvas){max-width:860px}
 
-.deck{flex:1;overflow:auto;padding:24px 24px 24px 48px;background:var(--s3)}
+.deck{position:relative;flex:1;overflow:auto;padding:24px 24px 24px 48px;background:var(--s3)}
 .slidewrap{position:relative;margin:0 auto 28px;box-shadow:0 2px 14px #0009}
 .pdfc{display:block;background:#fff}
 .slidewrap.act{outline:2px solid #9a9a9a;outline-offset:3px}
 .slidewrap .num{position:absolute;left:-30px;top:0;color:var(--mut);font-size:12px}
 .slide{position:relative;overflow:hidden;color:#111;font-family:Calibri,Carlito,"Segoe UI",sans-serif}
-.shp{position:absolute;overflow:hidden}
+.shp{position:absolute;box-sizing:border-box;word-wrap:break-word}
+.shp.pic{overflow:hidden}.shp.mst{pointer-events:none}
 .shp img{width:100%;height:100%;display:block}
+.pp[data-bu]::before{content:attr(data-bu);display:inline-block;min-width:var(--bw,.8em);text-indent:0;color:var(--buc,inherit)}
+.pnav{display:inline-flex;align-items:center;gap:4px;color:var(--mut);font-size:12px;margin:0 4px 0 8px}.pnav input{width:54px;padding:2px 6px;text-align:center}
+.ptbl{border-collapse:collapse;width:100%;height:100%;table-layout:fixed}.ptbl td{border:1px solid #0003;vertical-align:top}
+.pplay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:56px;height:56px;border-radius:50%;background:#000a;color:#fff;border:2px solid #fff;font-size:22px;justify-content:center}
+.pvid{width:100%;height:100%;background:#000}
 .shp.act{outline:2px dashed var(--t5);outline-offset:1px}
-.pp{white-space:pre-wrap;line-height:1.15;outline:none;min-height:1em;padding:0 .4em}
+.pp{white-space:pre-wrap;line-height:1.2;outline:none;min-height:1em}
 .pp:focus{background:#0000000a}
 /* view headers: icon chip + title/subtitle + grouped controls */
 .vhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -252,7 +258,7 @@ body[data-ink="draw"] .inkhost{cursor:crosshair}
 .lockform h3{margin:4px 0 0}
 .lockmsg{padding:24px 14px;text-align:center;color:var(--mut)}
 /* infinite whiteboard */
-.wb{display:flex;flex-direction:column;height:100%}
+.wb{display:flex;flex-direction:column;height:100%}#main>.wb{margin-top:0}
 .wb-top{gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--s1),var(--s1))}
 .wb-top .hico{width:36px;height:36px;border-radius:10px}
 .wb-top #bn{width:260px;background:none;border-color:transparent;font-weight:700;font-size:16px;padding:2px 6px;margin-left:-6px}
@@ -362,7 +368,7 @@ dialog.wide{width:fit-content;max-width:96vw}
 body.widget #side,body.widget #aiBtn,body.widget #kbdTab,body.widget #calcBtn{display:none!important}
 body.widget main{margin:0;border-radius:0;border:none}
 .wgt{padding:14px 16px 20px;display:grid;gap:8px}.wgt h3{margin:10px 0 0;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
-.wscratch{width:100%;height:150px;resize:vertical;background:#3a3618;border-color:#4a4520;border-radius:10px;padding:10px}
+.wscratch{width:100%;height:150px;resize:vertical;background:color-mix(in srgb,var(--acc2) 9%,var(--s2));border-color:color-mix(in srgb,var(--acc2) 22%,var(--s3));border-radius:10px;padding:10px}
 .ctx button:hover{background:var(--panel2)}
 .ctx hr{border:none;border-top:1px solid var(--line);margin:4px 0}
 .ctx .pal{display:flex;gap:7px;padding:6px 10px}
@@ -411,8 +417,10 @@ kbd{font:12px Consolas,monospace;background:var(--s0);border:1px solid var(--s5)
 #kbdTab[hidden]{display:none}
 #kbdTab:hover{color:var(--t1);background:var(--panel2)}
 .toast.upd{bottom:72px;display:flex;gap:10px;align-items:center}
+.toast button{background:none;border:none;color:var(--acc2);font-weight:600;padding:0 0 0 14px;min-height:32px}
+.pgpill{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);padding:4px 12px;border-radius:14px;background:#000b;color:#fff;font-size:13px;pointer-events:none;transition:opacity .25s;z-index:4}.pgpill.off{opacity:0}
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--s4);border:1px solid var(--s5);padding:8px 18px;border-radius:20px;z-index:30;box-shadow:0 4px 16px #0008;animation:pop .15s}
-.pp:empty::before{content:'Click to add text';color:var(--mut)}
+.pp:empty:focus::before{content:'Type here';color:#999}
 /* sticky notes on slides */
 .stk-layer{position:absolute;inset:0;pointer-events:none;z-index:3}
 .sticky{position:absolute;pointer-events:auto;--ink:#3b3200}
@@ -594,6 +602,7 @@ details.man>div{padding:0 4px 12px 20px;color:var(--t2);font-size:13.5px;line-he
   .etop{flex-wrap:wrap}
 }
 .pback{display:none}
+.lico{display:none}
 /* phones: bottom tabs and one column at a time */
 @media (max-width:700px){
   html,body{height:100%}
@@ -607,6 +616,9 @@ details.man>div{padding:0 4px 12px 20px;color:var(--t2);font-size:13.5px;line-he
   #aiBtn,#kbdTab,#kbd,.rz{display:none!important}
   .pback{display:flex;align-items:center;gap:4px;flex:none;min-height:44px;padding:4px 10px;color:var(--t2);text-decoration:none;font-size:14px;border-bottom:1px solid var(--line)}
   .pback{overflow:hidden;white-space:nowrap}
+  /* action buttons: icon only, their title names them */
+  .lbl{display:none}.lico{display:inline-flex}
+  :is(button,.btn):has(>.lbl){justify-content:center;min-width:44px;padding-left:0;padding-right:0}
   /* one column at a time */
   .on-cols{position:relative}
   .on-secs,.on-pages,.on-cols .editor,.split .list,.split .editor,.split .fview{width:100%!important;flex:1 1 100%!important;min-width:0;border-right:none}
@@ -638,6 +650,30 @@ details.man>div{padding:0 4px 12px 20px;color:var(--t2);font-size:13.5px;line-he
   .wb-tools{left:6px;right:6px;transform:none;overflow-x:auto;justify-content:flex-start;scrollbar-width:none}
   .srow{gap:10px}.box{padding:12px}
   .tb>*{flex:none;white-space:nowrap}
+  /* tasks: title on one line, date under it; the add form never wraps its button onto a line of its own */
+  #addT{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}#addT input[name=t]{grid-column:1/-1}#addT input[type=date]{width:100%;min-width:0}#addT .pri{justify-content:center;padding:0 24px}
+  .task{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:0 8px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .task input[type=checkbox]{margin:0}.task .tt{grid-column:2;padding-left:4px}.task .x{grid-column:3;grid-row:1}
+  .task .td,.hcols .task .td{grid-column:2;grid-row:2;width:auto;justify-self:start;min-height:32px;padding:2px 4px;border-color:transparent;background:none;color:var(--mut);font-size:12.5px}
+  .toast{bottom:calc(92px + env(safe-area-inset-bottom));display:flex;align-items:center;white-space:nowrap}
+  /* settings */
+  .setnav{gap:4px;margin:0 -14px;padding:0 14px}.setnav a{padding:8px 14px;border-radius:20px;background:var(--panel)}.setnav a.on{box-shadow:none;background:var(--acc);color:var(--t1)}
+  .setbody .row{align-items:stretch}.setbody .row>input,.setbody .row>select{width:100%!important;flex:1 1 100%}
+  .wtab,.wtab tbody{display:block}.wtab tr{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}.wtab tr:last-child{border-bottom:none}
+  .wtab td{display:block;width:auto!important;padding:0;border:none}.wtab td:first-child{grid-column:1/-1}.wtab label{display:flex;align-items:center;gap:10px;font-weight:600}.wtab input[type=checkbox]{margin:0}
+  /* home */
+  .grip{display:none}
+  /* whiteboard: one line of actions, every tool visible in a grid along the bottom, under the thumb */
+  .wb-top{flex-wrap:nowrap;overflow-x:auto;padding:6px 8px;gap:6px;scrollbar-width:none}.wb-top::-webkit-scrollbar{display:none}.wb-top>*{flex:none}
+  .wb-top .hico,.wb-top>span,.wb-top small{display:none}.wb-top .htitle{flex:1 0 120px}.wb-top #bn{width:100%;margin:0}.wb-top .seg:has(#wbUndo){order:1}.wb-top #wbBg{order:2}.wb-top #wbTheme{order:3}.wb-top #wbPng{order:4}.wb-top #wbDel{order:5}
+  .wb-tools{left:6px;right:6px;top:auto;bottom:6px;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:2px;padding:4px;max-width:none;overflow:visible;transform:none}
+  .wb-tools .vs{display:none}.wb-tools [data-a=finger]{order:-1}
+  .wb-stage .wb-tools button{width:100%;min-width:0;min-height:42px;height:42px;font-size:13px}.wb-stage .wb-tools button.on{border-color:transparent}
+  .wb-stage .wb-tools .sw{order:1;width:100%;min-width:0;height:42px;padding:9px calc(50% - 12px)}.wb-stage .wb-tools .sw.on{outline:2px solid var(--t1);outline-offset:-5px}
+  .wb-stage .wb-tools input[type=range]{order:2;grid-column:span 3;width:100%;min-width:0;height:42px}
+  .wb-stage .wb-zoom{left:6px;top:6px;bottom:auto;padding:2px}.wb-stage .wb-zoom button{min-width:38px;min-height:38px;height:38px;padding:0 4px}
+  /* files: the header gives its height to the page */
+  .fview .etop{padding:4px 12px}.fview .tb{padding:2px 6px}
 }
 @media (max-width:700px) and (max-height:620px){ /* the keyboard is up: give the room to the text */
   #side,.pdate,.inkrow{display:none}
@@ -660,6 +696,13 @@ html,body{overscroll-behavior:none}
   input[type=checkbox]:checked::after{left:7px;top:3px;width:5px;height:10px}
   .inkbar input[type=range],.wb-tools input[type=range]{width:90px;height:44px}
   .ctx .pal button,.wb-selbar .sw{min-height:0;width:30px;height:30px}.stk-h .stk-c{min-height:0;min-width:0;width:26px;height:26px}
+  /* swiping a task: the coloured strips sit just outside the row and slide in with it */
+  #tl,.wlist{overflow-x:clip}.task{position:relative;touch-action:pan-y}
+  .task::before,.task::after{position:absolute;top:0;bottom:0;width:100vw;display:flex;align-items:center;padding:0 18px;color:#fff;font-weight:600}
+  .task::before{content:'✓ Done';right:100%;justify-content:flex-end;background:var(--acc)}.task.done::before{content:'↩ Not done'}.task::after{content:'Delete';left:100%;background:#c0392b}
+  /* inputs match the buttons beside them; a press shows at once, before the view behind it has rendered */
+  input:not([type=checkbox],[type=range],[type=color],[type=radio]),select{min-height:44px}
+  button:active,a:active,.item:active,.card:active,.on-pg:active,.on-sec:active{opacity:.55;transition:none}
 }</style>
 </head>
 <body>
