@@ -31,6 +31,12 @@ button:hover,.btn:hover{border-color:var(--s6)}
 .pri{background:var(--acc);border-color:var(--acc);color:var(--t1)}
 input,select,textarea{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 input:focus,select:focus,textarea:focus{outline:1px solid var(--t5);border-color:var(--t5)}
+:where(button,a,select,summary,[tabindex]):focus-visible{outline:2px solid var(--acc2);outline-offset:2px}
+::placeholder{color:var(--t5);opacity:1}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+body.nosave::after{content:'Not saved';position:fixed;top:10px;right:14px;z-index:31;background:#7a2020;color:#fff;font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;pointer-events:none}
+body.syncfail a.nav[href="#/settings"]::after{content:'';width:8px;height:8px;border-radius:50%;background:#ff7b7b;flex:none;margin-left:auto}
+body.syncfail.collapsed a.nav[href="#/settings"]::after{margin-left:-6px;align-self:flex-start}
 .mut{color:var(--mut)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
@@ -416,7 +422,7 @@ kbd{font:12px Consolas,monospace;background:var(--s0);border:1px solid var(--s5)
 #kbdTab{position:fixed;right:9px;top:50%;transform:translateY(-50%);writing-mode:vertical-rl;background:var(--panel);border:1px solid var(--line);border-right:none;border-radius:10px 0 0 10px;padding:14px 7px;z-index:4;color:var(--mut);font-size:12px}
 #kbdTab[hidden]{display:none}
 #kbdTab:hover{color:var(--t1);background:var(--panel2)}
-.toast.upd{bottom:72px;display:flex;gap:10px;align-items:center}
+.toast.upd,.toast.keep{bottom:72px;display:flex;gap:10px;align-items:center}
 .toast button{background:none;border:none;color:var(--acc2);font-weight:600;padding:0 0 0 14px;min-height:32px}
 .pgpill{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);padding:4px 12px;border-radius:14px;background:#000b;color:#fff;font-size:13px;pointer-events:none;transition:opacity .25s;z-index:4}.pgpill.off{opacity:0}
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--s4);border:1px solid var(--s5);padding:8px 18px;border-radius:20px;z-index:30;box-shadow:0 4px 16px #0008;animation:pop .15s}
@@ -710,7 +716,7 @@ html,body{overscroll-behavior:none}
 <main id="main"></main>
 <button id="aiBtn" title="AI Assistant"></button>
 <section id="ai" hidden>
-  <header>AI Assistant <button id="aiClose">×</button></header>
+  <header>AI assistant <button id="aiClose" title="Close assistant" aria-label="Close assistant">×</button></header>
   <div id="aiLog"></div>
   <div class="foot">
     <label class="mut" style="font-size:12px"><input type="checkbox" id="aiCtx" checked> Include the open note / file</label>

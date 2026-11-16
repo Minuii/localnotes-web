@@ -70,7 +70,9 @@ if (CAP) {
     async ai({ key, model, messages }) {
       const r = await capCall('CapacitorHttp', 'post', { url: 'https://api.deepseek.com/chat/completions', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, data: { model, messages }, responseType: 'json' });
       if (r.status >= 400) throw new Error(r.data?.error?.message || `HTTP ${r.status}`);
-      return r.data.choices[0].message.content;
+      const text = r.data?.choices?.[0]?.message?.content;
+      if (typeof text !== 'string') throw new Error('The AI service sent an empty reply');
+      return text;
     },
     async exportPdf(name, html) { await capCall('LocalPrint', 'print', { name, html }); return false; } // Android's print screen has Save as PDF
   };

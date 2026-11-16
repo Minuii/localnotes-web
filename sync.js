@@ -85,12 +85,12 @@ async function gh(path, opt = {}, raw = false) {
   if (r.status === 403) throw new Error('The token lacks access, or GitHub is rate limiting');
   return r;
 }
-async function ghInfo(path) { const r = await gh(`contents/${path}`); if (r.status === 404) return null; if (!r.ok) throw new Error(`GitHub error ${r.status}`); return r.json(); }
-async function ghRead(sha) { const r = await gh(`git/blobs/${sha}`, {}, true); if (!r.ok) throw new Error(`GitHub error ${r.status}`); return r.arrayBuffer(); }
+async function ghInfo(path) { const r = await gh(`contents/${path}`); if (r.status === 404) return null; if (!r.ok) throw new Error(`GitHub couldn't complete the request (error ${r.status}). Try again in a minute`); return r.json(); }
+async function ghRead(sha) { const r = await gh(`git/blobs/${sha}`, {}, true); if (!r.ok) throw new Error(`GitHub couldn't complete the request (error ${r.status}). Try again in a minute`); return r.arrayBuffer(); }
 async function ghWrite(path, bytes, sha, message) {
   const r = await gh(`contents/${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, content: toB64(bytes), ...(sha ? { sha } : {}) }) });
   if (r.status === 409 || r.status === 422) return false; // someone else wrote first
-  if (!r.ok) throw new Error(`GitHub error ${r.status}`);
+  if (!r.ok) throw new Error(`GitHub couldn't complete the request (error ${r.status}). Try again in a minute`);
   return true;
 }
 async function ghDelete(path, sha) { await gh(`contents/${path}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'Remove file', sha }) }); }
@@ -145,7 +145,8 @@ async function syncOnce() {
   return changed;
 }
 let syncSkipped = [];
-function setSyncMsg(t) { syncMsg = t; const el = $('#syncSt'); if (el) el.textContent = t; }
+function setSyncMsg(t) { syncMsg = t; document.body.classList.toggle('syncfail', t.startsWith('Not synced')); // a red dot on Settings until a sync works
+  const el = $('#syncSt'); if (el) el.textContent = t; }
 async function syncNow(manual) {
   if (syncBusy) return scheduleSync(); // edits made during a sync go in the next one
   if (!syncCfg?.repo || IS_WIDGET) return; syncBusy = true; clearTimeout(syncTimer); setSyncMsg('Syncing…');
@@ -155,7 +156,7 @@ async function syncNow(manual) {
     setSyncMsg(`Synced ${new Date().toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit' })}${syncSkipped.length ? `, but too big for GitHub: ${syncSkipped.join(', ')}` : ''}`);
     if (manual) toast(changed ? 'Synced: changes came in from your other device' : 'Everything is in sync');
     if (changed) { save(); document.activeElement?.matches('input,textarea,[contenteditable=true]') && view !== 'settings' ? renderSide(...sideArgs) : route(); }
-  } catch (e) { console.warn('sync', e); setSyncMsg(`Not synced: ${e.message}`); if (manual) toast(e.message); }
+  } catch (e) { console.warn('sync', e); setSyncMsg(`Not synced: ${e.message}`); if (manual) toast(e.message, null, true); }
   syncBusy = false;
 }
 // after edits, once you've paused: each sync is a commit, so not after every keystroke
@@ -178,7 +179,7 @@ async function startSync() {
 function forgetSyncBase() { syncBase = null; if (db) { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete('syncBase'); } }
 
 /* ---------- Settings → Sync ---------- */
-const syncSettingsHTML = () => `<section class="box" data-ch="sync"><h3>Sync between PC and iPad</h3>
+const syncSettingsHTML = () => `<section class="box" data-ch="sync"><h3>Sync between your devices</h3>
   <p class="mut" style="margin-top:0">Keeps this device in step with your others through a <b>private GitHub repo</b>. Notes and files are encrypted on this device first, so GitHub only ever holds unreadable data. Setup steps are in <b>SYNC.md</b>.</p>
   <div class="syncf"><label>Repo<input id="syRepo" placeholder="your-name/localnotes-data" value="${esc(syncCfg?.repo || '')}" autocomplete="off" spellcheck="false"></label>
   <label>GitHub token<input id="syTok" type="password" autocomplete="off" placeholder="${syncCfg?.token ? 'Saved on this device' : 'github_pat_…'}"></label>
@@ -190,7 +191,8 @@ function bindSyncSettings() {
   $('#sySave').onclick = async () => {
     const repo = $('#syRepo').value.trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, ''), token = $('#syTok').value.trim() || syncCfg?.token, pass = $('#syPass').value || syncCfg?.pass;
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return toast('Repo should look like your-name/repo-name');
-    if (!token || !pass || pass.length < 8) return toast('Enter the token and a passphrase of at least 8 characters');
+    if (!token) return toast('Enter your GitHub token');
+    if (!pass || pass.length < 8) return toast('Use a passphrase of at least 8 characters');
     const first = !syncCfg?.repo; syncCfg = { ...syncCfg, repo, token, pass, auto: $('#syAuto').checked }; await idbPut('kv', 'sync', syncCfg);
     await syncNow(true); if (first && syncCfg.last) { route(); startSync(); }
   };

@@ -139,8 +139,8 @@ const writeState = () => saveQ = saveQ.then(async () => {
       t.oncomplete = res; t.onerror = t.onabort = () => rej(t.error || new Error('Could not write to storage'));
     });
     puts.forEach(([key, j]) => onDisk.set(key, j)); dels.forEach(key => onDisk.delete(key));
-    saveFailed = false; bcState(); scheduleSync(); syncReminders(); }
-  catch (e) { console.error(e); if (!saveFailed) toast('Could not save — storage may be full. Export a backup from Settings.'); saveFailed = true; }
+    if (saveFailed) { document.body.classList.remove('nosave'); document.querySelector('.toast.keep')?.remove(); } saveFailed = false; bcState(); scheduleSync(); syncReminders(); }
+  catch (e) { console.error(e); if (!saveFailed) toast('Could not save — storage may be full. Export a backup from Settings.', null, true); saveFailed = true; document.body.classList.add('nosave'); } // "Not saved" stays on screen until a save works
 });
 const flush = async () => { if (!S) return; if (IS_WIDGET) return bc?.postMessage({ type: 'patch', tasks: S.tasks, events: S.events, scratch: S.scratch }); return writeState(); };
 addEventListener('pagehide', flush);
@@ -154,7 +154,7 @@ function seed() {
     notebooks: [nb], sections: [sec], migratedSections: true, tasks: [], events: [], boards: [], files: [], trash: [], refs: [], templates: [], ics: {}, scratch: '',
     settings: { aiKey: '', aiModel: 'deepseek-chat', cals: [], collapsed: false },
     notes: [{ id: uid(), title: 'Welcome', notebookId: nb.id, sectionId: sec.id, level: 0, order: 0, paper: 'blank', pcolor: 'dark', created: Date.now(), updated: Date.now(),
-      html: `<p>Everything here is saved locally on this computer. Press <b>F1</b> to see every keyboard shortcut.</p><h2>Notebooks</h2><p>Notebooks hold coloured <b>sections</b> (chapters), sections hold <b>pages</b> and subpages. Headings on a page show up as chapter points in the page list and in the notebook <b>Index</b>. Right-click pages and sections for more options, or drag them to reorder.</p><h2>Math</h2><p>Press <b>Alt+=</b> to insert an equation (on an empty line it becomes a centered block), or type math between dollar signs — inline like <span class="math" data-tex="e^{i\\pi}+1=0"></span>, or a block with double dollars:</p><span class="math" data-display="1" data-tex="\\int_0^1 x^2\\,dx = \\tfrac{1}{3}"></span><h2>Tags &amp; ink</h2><p><input type="checkbox" checked="">&nbsp;Ctrl+1 adds a to-do, Ctrl+2–6 add Important, Question, Remember, Definition and Critical tags.</p><p>Write with your pen right on the page. Scribble back and forth over ink to erase it, and turn on ◯△ to turn rough shapes into clean ones.</p>` }]
+      html: `<p>Everything here is saved locally on this device. With a keyboard, press <b>F1</b> to see every shortcut.</p><h2>Notebooks</h2><p>Notebooks hold coloured <b>sections</b> (chapters), sections hold <b>pages</b> and subpages. Headings on a page show up as chapter points in the page list and in the notebook <b>Index</b>. Right-click pages and sections for more options, or drag them to reorder.</p><h2>Math</h2><p>Press <b>Alt+=</b> to insert an equation (on an empty line it becomes a centered block), or type math between dollar signs — inline like <span class="math" data-tex="e^{i\\pi}+1=0"></span>, or a block with double dollars:</p><span class="math" data-display="1" data-tex="\\int_0^1 x^2\\,dx = \\tfrac{1}{3}"></span><h2>Tags &amp; ink</h2><p><input type="checkbox" checked="">&nbsp;Ctrl+1 adds a to-do, Ctrl+2–6 add Important, Question, Remember, Definition and Critical tags.</p><p>Write with your pen right on the page. Scribble back and forth over ink to erase it, and turn on ◯△ to turn rough shapes into clean ones.</p>` }]
   };
 }
 
@@ -253,7 +253,7 @@ function smartInk(stroke, list, minShape = 0) { // -> { erase: [strokes] } | { s
   if (v.length === 3 || v.length === 4) return { shape: flat([...v, v[0]]) }; // triangle / quadrilateral
   return null;
 }
-const inkBar = () => `<span class="inkbar"><select class="ink-mode" title="What draws"><option value="type">⌨ Type only</option><option value="pen">✒ Stylus draws</option><option value="draw">✒ Draw (all input)</option></select><button data-ink-tool="pen" title="Pen">✒</button><button data-ink-tool="eraser" title="Eraser (pen eraser end also works)">⌫</button><button data-ink-tool="lasso" title="Lasso: circle ink to move, resize, recolour, copy or delete it">${icon('lasso', 15)}</button>${INK_COLORS.map(c => `<button class="sw" data-ink-col="${c}" style="background:${c}"></button>`).join('')}<input type="range" class="ink-size" min="1" max="12" title="Pen size"><button data-ink="shapes" title="Ink to shape — rough circles, lines, triangles and boxes snap clean (Ctrl+Shift+S)">◯△</button><button data-ink="scratch" title="Scratch-out: scribble back and forth over ink to erase it">✗≈</button>${hwOn() ? '<button data-ink="totext" title="Handwriting to text">Aa</button>' : ''}<button data-ink="undo" title="Undo ink">↶</button><button data-ink="clear" title="Clear ink">Clear</button></span>`;
+const inkBar = () => `<span class="inkbar"><select class="ink-mode" title="What draws"><option value="type">⌨ Type only</option><option value="pen">✒ Stylus draws</option><option value="draw">✒ Draw (any input)</option></select><button data-ink-tool="pen" title="Pen">✒</button><button data-ink-tool="eraser" title="Eraser (pen eraser end also works)">⌫</button><button data-ink-tool="lasso" title="Lasso: circle ink to move, resize, recolour, copy or delete it">${icon('lasso', 15)}</button>${INK_COLORS.map(c => `<button class="sw" data-ink-col="${c}" style="background:${c}" title="Ink colour" aria-label="Ink colour ${c}"></button>`).join('')}<input type="range" class="ink-size" min="1" max="12" title="Pen size"><button data-ink="shapes" title="Ink to shape — rough circles, lines, triangles and boxes snap clean (Ctrl+Shift+S)">◯△</button><button data-ink="scratch" title="Scratch-out: scribble back and forth over ink to erase it">✗≈</button>${hwOn() ? '<button data-ink="totext" title="Handwriting to text">Aa</button>' : ''}<button data-ink="undo" title="Undo ink">↶</button><button data-ink="clear" title="Clear ink">Clear</button></span>`;
 function inkGroup(bar) { // one toolbar + undo stack shared by every surface in the view
   const g = { undo: [], surfaces: [], bar };
   liveInkGroups.add(g);
@@ -470,7 +470,7 @@ async function sealState() { // what goes to disk: pages of protected sections o
   return { ...S, notes };
 }
 function protectSection(s) {
-  dialog(`<h3>${icon('lock', 18)} Password protect “${esc(s.name)}”</h3><input type="password" name="p" placeholder="Password" required minlength="4"><input type="password" name="c" placeholder="Confirm password" required><small class="mut">Pages are encrypted on this computer. If you forget the password they can't be recovered.</small>`, async d => {
+  dialog(`<h3>${icon('lock', 18)} Password protect “${esc(s.name)}”</h3><input type="password" name="p" placeholder="Password" required minlength="4"><input type="password" name="c" placeholder="Confirm password" required><small class="mut">Pages are encrypted on this device. If you forget the password they can't be recovered.</small>`, async d => {
     if (d.p !== d.c) return alert("The passwords don't match.");
     const salt = crypto.getRandomValues(new Uint8Array(16)), key = await deriveKey(d.p, salt);
     s.lock = { salt: toB64(salt), check: await encJSON(key, 'ok') }; secKeys.set(s.id, key);
@@ -597,6 +597,10 @@ function exportNotebook(nb) {
 // spelling & grammar, no AI key: LanguageTool's free service (the text you fix is sent to languagetool.org, no account),
 // or, offline / if that fails, this computer's spell-check dictionary (spelling only). Returns [{ at, len, rep }]
 async function grammarFixes(text) {
+  if (!S.settings.ltOk) { // asked once: nothing else in a page leaves the device without a setup step
+    if (!confirm('This sends the text you are checking to LanguageTool (languagetool.org), a free online checker. Nothing else is sent. Continue?')) return null;
+    S.settings.ltOk = true; save();
+  }
   try {
     const r = await fetch('https://api.languagetool.org/v2/check', { method: 'POST', signal: AbortSignal.timeout(10000), body: new URLSearchParams({ text, language: 'auto', preferredVariants: 'en-GB' }) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -663,7 +667,7 @@ addEventListener('hashchange', route);
 let sideArgs = [];
 function route() {
   commitEdit?.(); commitEdit = null;
-  closePdf(); document.querySelector('.inksel')?.remove(); if (tts.btn && location.hash !== tts.hash) stopSpeech();
+  closePdf(); closeDeck(); document.querySelector('.inksel')?.remove(); if (tts.btn && location.hash !== tts.hash) stopSpeech();
   viewKey = viewKeyUp = viewPaste = currentNote = currentFileText = insertIntoNote = insertImageIntoNote = boardSync = pageCtx = null;
   const [v = 'home', a, b, c] = location.hash.replace(/^#\/?/, '').split('/'); view = v;
   ({ widget: viewWidget, home: viewHome, notes: () => viewNotes(null, a), nb: () => viewNotebook(a, b, c), tasks: viewTasks, files: () => viewFiles(a),
@@ -769,7 +773,7 @@ function viewNotes(nbId, noteId) {
   const base = nb ? `#/nb/${nb.id}` : '#/notes';
   const ids = nb && new Set(nbDesc(nb.id));
   const notes = () => openNotes().filter(n => !ids || ids.has(n.notebookId)).sort((x, y) => y.updated - x.updated);
-  const sel = S.notes.find(n => n.id === noteId) || notes()[0];
+  const sel = notes().find(n => n.id === noteId) || notes()[0];
   main.innerHTML = `<div class="split" data-pane="${noteId ? 'view' : 'list'}"><div class="list" data-rz="list:220:600"><header>
       <div class="row"><h2>${icon(nb ? 'book' : 'notes')}${nb ? esc(nb.name) : 'Notes'}</h2><button class="pri" id="nn">${icon('plus', 16)} Note</button></div>
       ${nb ? '<div class="row"><button id="nbSub">＋ Folder</button><button id="nbRen">Rename</button><button id="nbDel">Delete</button></div>' : ''}
@@ -778,7 +782,7 @@ function viewNotes(nbId, noteId) {
   const items = () => {
     const q = $('#q').value.toLowerCase();
     $('#items').innerHTML = notes().filter(n => !q || (n.title + ' ' + plain(n.html)).toLowerCase().includes(q))
-      .map(n => `<div class="item${n === sel ? ' on' : ''}" data-id="${n.id}"><b>${esc(n.title || 'Untitled')}</b><p>${esc(plain(n.html).slice(0, 160))}</p><small>${nb ? '' : esc(nbName(n.notebookId)) + ' · '}${ago(n.updated)}</small></div>`).join('')
+      .map(n => `<div class="item${n === sel ? ' on' : ''}" tabindex="0" role="button" data-id="${n.id}"><b>${esc(n.title || 'Untitled')}</b><p>${esc(plain(n.html).slice(0, 160))}</p><small>${nb ? '' : esc(nbName(n.notebookId)) + ' · '}${ago(n.updated)}</small></div>`).join('')
       || '<p class="mut" style="padding:14px">No notes here yet.</p>';
   };
   $('#q').oninput = items;
@@ -859,7 +863,7 @@ function viewNotebook(nbId, secId, pageId) {
   main.innerHTML = `<div class="on-wrap" style="--secc:${sec.color}">
     <div class="on-top"><h2>${icon('book')}<span>${esc(nb.name)}</span></h2><a class="btn" href="#/nb/${nb.id}/index" title="Contents and A–Z index of this notebook">${icon('list', 16)} ${lbl('Index')}</a><a class="btn" href="#/nb/${nb.id}/tags" title="Every tagged line in this notebook">${icon('tag', 16)} ${lbl('Tags summary')}</a>${sec.lock && !isSealed(sec) ? `<button id="lockNow" title="Lock this section now">${icon('lock', 16)} ${lbl('Lock')}</button>` : ''}<button id="nbMenu" title="Notebook options">⋯</button></div>
     <div class="on-cols" data-pane="${isSealed(sec) && secId || pageId ? 'page' : secId ? 'pages' : 'secs'}">
-      <div class="on-secs" data-rz="secs:120:420"><div class="on-h">Sections <button id="addSec" title="New section (Ctrl+T)">＋</button></div><div id="secList">${secs.map(s => `<div class="on-sec${s === sec ? ' on' : ''}" draggable="true" data-id="${s.id}" style="--c:${s.color}" title="Double-click to rename, right-click for options"><span class="tabc"></span><span class="nm">${esc(s.name)}</span>${s.lock ? `<span class="mut" title="${isSealed(s) ? 'Locked' : 'Unlocked'}">${icon(isSealed(s) ? 'lock' : 'unlock', 13)}</span>` : `<small>${pagesOf(s.id).length || ''}</small>`}</div>`).join('')}</div></div>
+      <div class="on-secs" data-rz="secs:120:420"><div class="on-h">Sections <button id="addSec" title="New section (Ctrl+T)">＋</button></div><div id="secList">${secs.map(s => `<div class="on-sec${s === sec ? ' on' : ''}" tabindex="0" role="button" draggable="true" data-id="${s.id}" style="--c:${s.color}" title="Double-click to rename, right-click for options"><span class="tabc"></span><span class="nm">${esc(s.name)}</span>${s.lock ? `<span class="mut" title="${isSealed(s) ? 'Locked' : 'Unlocked'}">${icon(isSealed(s) ? 'lock' : 'unlock', 13)}</span>` : `<small>${pagesOf(s.id).length || ''}</small>`}</div>`).join('')}</div></div>
       <div class="on-pages" data-rz="pages:170:560">${backLink(`#/nb/${nb.id}`, 'Sections')}<div class="on-h">Pages <button id="addPg" title="New page (Ctrl+N)">＋ Page</button></div><input id="pq" placeholder="Search notebook…"><div id="pgList"></div></div>
       <div class="editor" id="ed"></div>
     </div></div>`;
@@ -868,7 +872,7 @@ function viewNotebook(nbId, secId, pageId) {
   const drawPages = () => {
     const q = $('#pq').value.toLowerCase();
     const list = q ? openNotes().filter(n => n.notebookId === nb.id && (n.title + ' ' + plain(n.html)).toLowerCase().includes(q)) : pagesOf(sec.id);
-    pgList.innerHTML = list.map(p => `<div class="on-pg lv${q ? 0 : p.level || 0}${p === page ? ' on' : ''}" draggable="${!q}" data-id="${p.id}"><b>${esc(p.title || 'Untitled page')}</b>${q ? `<small>${esc(secOf(p.sectionId)?.name || '')}</small>` : ''}</div>${p === page && !q ? headingsOf(p).map(h => `<div class="on-hd h${h.lv}" data-h="${h.i}" title="Jump to this heading">${esc(h.text)}</div>`).join('') : ''}`).join('')
+    pgList.innerHTML = list.map(p => `<div class="on-pg lv${q ? 0 : p.level || 0}${p === page ? ' on' : ''}" tabindex="0" role="button" draggable="${!q}" data-id="${p.id}"><b>${esc(p.title || 'Untitled page')}</b>${q ? `<small>${esc(secOf(p.sectionId)?.name || '')}</small>` : ''}</div>${p === page && !q ? headingsOf(p).map(h => `<div class="on-hd h${h.lv}" data-h="${h.i}" title="Jump to this heading">${esc(h.text)}</div>`).join('') : ''}`).join('')
       || `<p class="mut" style="padding:12px">${q ? 'No matches.' : 'No pages yet — press Ctrl+N.'}</p>`;
   };
   $('#pq').oninput = drawPages;
@@ -881,7 +885,7 @@ function viewNotebook(nbId, secId, pageId) {
     ctxMenu(e, [['＋ New page below', () => newNote(p.sectionId, { after: p })], ['↳ New subpage', () => newNote(p.sectionId, { after: p, level: Math.min((p.level || 0) + 1, 2) })], '-',
       ['⇥ Make subpage  (Ctrl+Alt+])', () => { setLevel(p, 1); drawPages(); }], ['⇤ Promote  (Ctrl+Alt+[)', () => { setLevel(p, -1); drawPages(); }], '-',
       ['↑ Move up', () => { moveIn(pagesOf(p.sectionId), p, -1, l => l[0].level = 0); drawPages(); }], ['↓ Move down', () => { moveIn(pagesOf(p.sectionId), p, 1, l => l[0].level = 0); drawPages(); }], '-',
-      ['Delete page', async () => { if (confirm(`Move "${p.title || 'Untitled page'}" to the trash?`)) { await trashNote(p); location.hash = `#/nb/${nb.id}/${sec.id}`; route(); } }]]);
+      ['Move page to trash', async () => { if (confirm(`Move "${p.title || 'Untitled page'}" to the trash?`)) { await trashNote(p); location.hash = `#/nb/${nb.id}/${sec.id}`; route(); } }]]);
   };
   secList.onclick = e => { const it = e.target.closest('.on-sec'); if (it) location.hash = `#/nb/${nb.id}/${it.dataset.id}`; };
   const renameSec = async s => { const n = await ask('Section name', s.name); if (n?.trim()) { s.name = n.trim(); save(); route(); } };
@@ -891,7 +895,7 @@ function viewNotebook(nbId, secId, pageId) {
     ctxMenu(e, [['✏ Rename', () => renameSec(s)], ['palette', c => { s.color = c; save(); route(); }, s.color], ['＋ New page here', () => newNote(s.id)], '-',
       ['↑ Move up', () => { moveIn(sectionsOf(nb.id), s, -1); route(); }], ['↓ Move down', () => { moveIn(sectionsOf(nb.id), s, 1); route(); }], '-',
       ...(!s.lock ? [[`${icon('lock', 15)} Password protect…`, () => protectSection(s)]] : isSealed(s) ? [] : [[`${icon('lock', 15)} Lock now`, () => lockSection(s)], [`${icon('unlock', 15)} Remove password`, () => removeProtection(s)]]), '-',
-      ['Delete section', async () => {
+      ['Move section to trash', async () => {
         const n = pagesOf(s.id).length;
         if (!confirm(`Move section "${s.name}"${n ? ` and its ${n} page${n > 1 ? 's' : ''}` : ''} to the trash?`)) return;
         await trashSection(s); location.hash = `#/nb/${nb.id}`; route();
@@ -920,7 +924,7 @@ function viewNotebook(nbId, secId, pageId) {
   $('#addSec').onclick = () => newSection(nb);
   $('#addPg').onclick = () => newNote(sec.id);
   $('#nbMenu').onclick = e => ctxMenu(e, [['✏ Rename notebook', async () => { const n = await ask('Notebook name', nb.name); if (n?.trim()) { nb.name = n.trim(); save(); route(); } }], ['＋ New section  (Ctrl+T)', () => newSection(nb)], [`${icon('download', 15)} Export notebook as PDF`, () => exportNotebook(nb)], '-',
-    ['Delete notebook', async () => {
+    ['Move notebook to trash', async () => {
       const n = S.notes.filter(p => p.notebookId === nb.id).length;
       if (!confirm(`Move notebook "${nb.name}" with all its sections and ${n} page${n === 1 ? '' : 's'} to the trash?`)) return;
       await trashNotebook(nb); location.hash = '#/home';
@@ -998,7 +1002,7 @@ function openEditor(el, note, refresh, base) {
   el.innerHTML = `<div class="etop"><select id="nbSel" title="Move to section">${S.notebooks.map(nb => `<optgroup label="${esc(nb.name)}">${sectionsOf(nb.id).map(s => `<option value="${s.id}"${s.id === note.sectionId ? ' selected' : ''}${isSealed(s) ? ' disabled' : ''}>${esc(s.name)}${s.lock ? ' 🔒' : ''}</option>`).join('')}</optgroup>`).join('')}</select>
     <select id="paperSel" title="Paper style">${PAPERS.map(([v, t]) => `<option value="${v}"${(note.paper || 'blank') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
     <select id="pcSel" title="Page colour">${PCOLORS.map(([v, t]) => `<option value="${v}"${(note.pcolor || 'dark') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
-    <span style="flex:1">Edited ${ago(note.updated)}</span><button id="ttsBtn" title="Read aloud: the selected text, or the whole page">${icon('speaker', 15)}</button><button id="drawBtn" class="tdraw${S.settings.inkRow ? ' on' : ''}" title="Show pen & ink tools (your stylus draws either way in “Stylus draws” mode)">${icon('pen', 15)} ${lbl('Draw')}</button><button id="expBtn" title="Export as PDF">${icon('download', 15)} ${lbl('Export')}</button><button id="delNote" title="Delete this page">${icon('trash', 16)} ${lbl('Delete')}</button></div>
+    <span style="flex:1">Edited ${ago(note.updated)}</span><button id="ttsBtn" title="Read aloud: the selected text, or the whole page">${icon('speaker', 15)}</button><button id="drawBtn" class="tdraw${S.settings.inkRow ? ' on' : ''}" title="Show pen & ink tools (your stylus draws either way in “Stylus draws” mode)">${icon('pen', 15)} ${lbl('Draw')}</button><button id="expBtn" title="Export as PDF">${icon('download', 15)} ${lbl('Export')}</button><button id="delNote" title="Move this page to the trash">${icon('trash', 16)} ${lbl('Delete')}</button></div>
     <input class="title" id="title" placeholder="Title" value="${esc(note.title)}"><div class="pdate">${created.toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} &nbsp; ${hm(created)}</div><div class="tb etb">${TB}</div><div class="inkrow"${S.settings.inkRow ? '' : ' hidden'}>${inkBar()}</div>
     <div class="bodywrap" id="bw"><div class="body paper-${note.paper || 'blank'} pc-${note.pcolor || 'dark'}" id="body" contenteditable="true" spellcheck="true">${note.html}</div><canvas class="ink"></canvas><div class="imgbar" hidden></div></div><input type="file" id="picIn" accept="image/*" hidden>`;
   const body = $('#body', el), title = $('#title', el);
@@ -1169,7 +1173,7 @@ function openEditor(el, note, refresh, base) {
         [icon('ul', 16), run(() => fmt('insertUnorderedList')), 'Bulleted list'], [icon('check', 16), run(() => applyTag('todo')), 'To-do'], [icon('link', 15), () => { restore(range); tb.querySelector('[data-c=link]').click(); }, 'Link'], ['<span class="tx">x²</span>', () => insertMath(false, range), 'Equation']]],
       '-', ...(cell ? [...tableMenuItems(cell, touch), '-'] : []), ...sp,
       [`${icon('speaker', 15)} Read aloud`, () => speak(range && !range.collapsed ? range.toString() : `${note.title}.\n${speakable(body)}`, $('#ttsBtn', el))],
-      [`${icon('check', 15)} Fix spelling & grammar`, async () => {
+      [`${icon('check', 15)} Fix spelling & grammar (online)`, async () => {
         restore(range); let r = curRange(); if (!r || r.collapsed) { const blk = blockOf(); if (!blk) return; r = document.createRange(); r.selectNodeContents(blk); }
         // map text offsets to text nodes, then replace only the wrong words (last first) so formatting and undo survive
         const nodes = [], w = document.createTreeWalker(r.commonAncestorContainer, NodeFilter.SHOW_TEXT); let text = '';
@@ -1244,7 +1248,7 @@ function bindTasks(el, rerender) {
     save(); rerender(); renderSide(view);
   };
   const changed = () => { save(); if (el.isConnected) rerender(); renderSide(view); };
-  const remove = row => { const i = S.tasks.findIndex(x => x.id === row.dataset.id), [t] = S.tasks.splice(i, 1); changed(); toast('Task deleted', () => { S.tasks.splice(i, 0, t); changed(); }); };
+  const remove = row => { const i = S.tasks.findIndex(x => x.id === row.dataset.id); if (i < 0) return rerender(); const [t] = S.tasks.splice(i, 1); changed(); toast('Task deleted', () => { S.tasks.splice(i, 0, t); changed(); }); };
   el.onclick = e => { if (e.target.classList.contains('x')) remove(e.target.closest('.task')); };
   el.onpointerdown = e => { // finger: swipe right to tick a task, left to delete it. Scrolling up and down stays with the browser, which sends pointercancel
     const row = e.target.closest('.task'), id = e.pointerId; if (e.pointerType !== 'touch' || !row) return;
@@ -1417,7 +1421,7 @@ setInterval(() => {
   if (--focus.left <= 0) {
     const done = focus.phase === 'Focus';
     if (done) { (S.focusLog ||= []).push({ at: Date.now(), mins: focus.secs / 60, task: focus.task }); save(); }
-    const msg = done ? 'Focus session done — take a 5 minute break' : 'Break over — back to it';
+    const msg = done ? 'Focus session done — take a 5-minute break' : 'Break over — back to it';
     try { new Notification(msg); } catch { toast(msg); } // Safari on iPad has no page notifications
     focus.phase = done ? 'Break' : 'Focus'; focus.secs = focus.left = (done ? 5 : 25) * 60;
   }
@@ -1443,7 +1447,7 @@ const WIDGETS = {
     bind: w => w.querySelector('[data-new]').onclick = () => newNote()
   }) },
   calendar: { name: 'Calendar', col: 0, make: () => ({
-    title: '<a href="#/calendar">Calendar ›</a>', tools: '<span class="mut" data-ml></span><button data-mp>‹</button><button data-mn>›</button>',
+    title: '<a href="#/calendar">Calendar ›</a>', tools: '<span class="mut" data-ml></span><button data-mp title="Previous month" aria-label="Previous month">‹</button><button data-mn title="Next month" aria-label="Next month">›</button>',
     body: '<section class="box hcal"><div class="mini"></div><div class="agenda"></div></section>',
     bind: w => {
       const q = s => w.querySelector(s);
@@ -1824,6 +1828,8 @@ function colorOf(s, el, ph) { // el holds a colour child (solidFill, gs, fillRef
   a = mod('alpha') ?? 1;
   return `rgba(${[r, g, b].map(x => Math.round(x * 255)).join(',')},${a})`;
 }
+let openDeck = null; // the deck on screen: its picture and video blob URLs hold the files in memory until they are revoked
+const closeDeck = () => { const d = openDeck; openDeck = null; if (d) for (const u of Object.values(d.urls)) Promise.resolve(u).then(x => URL.revokeObjectURL(x), () => { }); };
 const imgUrl = (deck, rels, blip) => { // blob URL for an embedded picture, made once per deck
   const t = rels?.[blip?.getAttributeNS(NS.r, 'embed')], f = t && !t.external && deck.zip.file(t.target);
   return f ? (deck.urls[t.target] ||= f.async('blob').then(b => URL.createObjectURL(/\.svg$/i.test(t.target) ? new Blob([b], { type: 'image/svg+xml' }) : b))) : null;
@@ -1983,7 +1989,7 @@ function renderSlide(deck, s, el, W, onEdit) {
         const media = ctx.rels[node.getElementsByTagNameNS('http://schemas.microsoft.com/office/powerpoint/2010/main', 'media')[0]?.getAttributeNS(NS.r, 'embed')];
         if (media && !media.external && deck.zip.file(media.target)) { // embedded video: play it in place on click
           const b = document.createElement('button'); b.className = 'pplay'; b.title = 'Play video'; b.innerHTML = '▶';
-          b.onclick = async () => { const v = document.createElement('video'); v.controls = v.autoplay = true; v.src = URL.createObjectURL(await deck.zip.file(media.target).async('blob')); v.className = 'pvid'; box.replaceChildren(v); };
+          b.onclick = async () => { const v = document.createElement('video'); v.controls = v.autoplay = true; v.src = await (deck.urls['video:' + media.target] ||= deck.zip.file(media.target).async('blob').then(x => URL.createObjectURL(x))); v.className = 'pvid'; box.replaceChildren(v); };
           box.append(b);
         }
       } else {
@@ -2043,7 +2049,7 @@ function viewFiles(id) {
     $('#fitems').innerHTML = hits.map(f => {
       let snip = '';
       if (q && f.text) { const i = f.text.toLowerCase().indexOf(q); if (i >= 0) snip = esc(f.text.slice(Math.max(0, i - 50), i)) + '<mark>' + esc(f.text.slice(i, i + q.length)) + '</mark>' + esc(f.text.slice(i + q.length, i + q.length + 80)); }
-      return `<div class="item${f === sel ? ' on' : ''}" data-id="${f.id}"><b><span class="ftype ${f.type}">${f.type.toUpperCase()}</span> ${esc(f.name)}</b>${snip ? `<p>…${snip}…</p>` : ''}<div class="tags">${f.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div><small>${kb(f.size)} · ${ago(f.added)}</small></div>`;
+      return `<div class="item${f === sel ? ' on' : ''}" tabindex="0" role="button" data-id="${f.id}"><b><span class="ftype ${f.type}">${f.type.toUpperCase()}</span> ${esc(f.name)}</b>${snip ? `<p>…${snip}…</p>` : ''}<div class="tags">${f.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div><small>${kb(f.size)} · ${ago(f.added)}</small></div>`;
     }).join('') || `<p class="mut" style="padding:14px">${S.files.length ? 'No matches.' : 'Drop lecture slides, PDFs or Markdown notes here, or click Add.'}</p>`;
   };
   $('#fq').oninput = e => { fileQ = e.target.value; items(); };
@@ -2057,7 +2063,7 @@ function viewFiles(id) {
   items();
   const fv = $('#fv');
   if (!sel) { fv.innerHTML = `<div class="empty">${icon('files', 40)}<div>Open a file, or drop lecture slides (.pptx), PDFs or Markdown notes anywhere here.</div></div>`; return; }
-  fv.innerHTML = `<div class="etop" style="padding:12px 20px"><b style="color:var(--tx);font-size:15px">${esc(sel.name)}</b><span style="flex:1"></span><input id="ftagin" placeholder="tags, comma separated" value="${esc(sel.tags.join(', '))}" style="width:240px"><button id="fdl">Export</button><button id="fdel" title="Delete this file">${icon('trash', 16)} ${lbl('Delete')}</button></div><div id="fbody" style="flex:1;display:flex;min-height:0"></div>`;
+  fv.innerHTML = `<div class="etop" style="padding:12px 20px"><b style="color:var(--tx);font-size:15px">${esc(sel.name)}</b><span style="flex:1"></span><input id="ftagin" placeholder="tags, comma separated" value="${esc(sel.tags.join(', '))}" style="width:240px"><button id="fdl">Export</button><button id="fdel" title="Move this file to the trash">${icon('trash', 16)} ${lbl('Delete')}</button></div><div id="fbody" style="flex:1;display:flex;min-height:0"></div>`;
   fv.insertAdjacentHTML('afterbegin', backLink('#/files', 'Files'));
   $('#ftagin').onchange = e => { sel.tags = [...new Set(e.target.value.split(',').map(t => t.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))]; save(); items(); };
   $('#fdel').onclick = () => { if (confirm(`Move "${sel.name}" to the trash?`)) { trashFile(sel); location.hash = '#/files'; } };
@@ -2073,6 +2079,7 @@ function viewFiles(id) {
   } else if (sel.type === 'pptx') { const fbody = $('#fbody'); fbody.innerHTML = `<div class="empty">Opening ${esc(sel.name)}…</div>`; idbGet('files', sel.id).then(async blob => {
     let deck; try { deck = await loadPptx(blob); } catch (e) { fbody.innerHTML = `<div class="empty">Could not open this presentation: ${esc(e.message)}</div>`; return; }
     if (!fbody.isConnected) return; // another file was opened while this one loaded
+    closeDeck(); openDeck = deck;
     currentFileText = `Presentation: ${sel.name}\n\n${pptxText(deck)}`;
     $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb">
       <button id="pnew" title="Add a blank slide after the selected one">＋ Slide</button><button id="pdup" title="Duplicate the selected slide">Duplicate</button><button id="prm" title="Delete the selected slide">Delete slide</button><span class="vs"></span>
@@ -2080,7 +2087,7 @@ function viewFiles(id) {
       <button id="pstk" title="Add a sticky note to the selected slide" >${icon('sticky', 16)} ${lbl('Sticky')}</button>${NATIVE ? '<button id="popen" title="Open a copy in PowerPoint (changes made there are not synced back)">Open in PowerPoint</button>' : ''}<label class="pnav" title="Go to slide"><input id="pgo" type="number" min="1" max="${deck.slides.length}" value="1" inputmode="numeric"> / ${deck.slides.length}</label><small id="pst" style="align-self:center;margin-left:6px">Saved</small>${inkBar()}</div><div class="deck" id="deck"></div></div>`;
     const deckEl = $('#deck'), g = inkGroup($('#fbody .inkbar')), W = deckWidth(deckEl), H = W * deck.cy / deck.cx, k = W / 1000;
     let saveT2, act = Math.min(pptxAct[sel.id] || 0, deck.slides.length - 1), actBox = null;
-    const edited = () => { $('#pst').textContent = 'Saving…'; clearTimeout(saveT2); saveT2 = setTimeout(async () => { await savePptx(sel, deck); $('#pst').textContent = 'Saved'; }, 800); };
+    const edited = () => { $('#pst').textContent = 'Saving…'; clearTimeout(saveT2); saveT2 = setTimeout(async () => { await savePptx(sel, deck); const st = $('#pst'); if (st) st.textContent = 'Saved'; }, 800); }; // the save can finish after you left the file
     // ink + sticky notes live in the app, keyed by slide part so they follow the slide when others are added or removed
     sel.ink = Array.isArray(sel.ink) || !sel.ink ? {} : sel.ink; sel.stickies ||= {};
     const select = i => { act = pptxAct[sel.id] = i; deckEl.querySelectorAll('.slidewrap').forEach((w, j) => w.classList.toggle('act', j === i)); };
@@ -2131,10 +2138,11 @@ function viewFiles(id) {
 }
 const pdfNative = {}, pdfZoom = {};
 let openPdf = null, pdfRun = 0; // pdf.js loading task: it holds a worker, so destroy it when the view changes
-const closePdf = () => { pdfRun++; openPdf?.destroy(); openPdf = null; };
+let pdfUrl = null;
+const closePdf = () => { pdfRun++; openPdf?.destroy(); openPdf = null; if (pdfUrl) { URL.revokeObjectURL(pdfUrl); pdfUrl = null; } };
 function nativePdf(sel, blob) { // Chromium's own viewer: zoom, print, text selection
   closePdf();
-  const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+  const url = pdfUrl = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
   $('#fbody').innerHTML = `<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="tb"><button id="pview" title="Back to pages with pen and sticky notes">${icon('sticky', 16)} Notes &amp; pen view</button></div><iframe src="${url}"></iframe></div>`;
   $('#pview').onclick = () => { pdfNative[sel.id] = false; pdfPages(sel, blob); };
 }
@@ -2206,22 +2214,24 @@ async function pdfPages(sel, blob) { // pdf.js pages, each with a pen layer and 
   const lazy = new IntersectionObserver(es => es.forEach(e => e.target._show(e.isIntersecting)), { root: deckEl, rootMargin: '600px 0px' }); // only pages near the view hold canvases: two full-size canvases per page would sink a long PDF
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i).catch(() => null); if (run !== pdfRun) return; // left this PDF while its pages were loading
-    const vp = page.getViewport({ scale: 1 }), H = W * vp.height / vp.width, key = 'p' + i; let task = null;
+    if (!page) continue; // a damaged page: show the rest
+    const vp = page.getViewport({ scale: 1 }), H = W * vp.height / vp.width, key = 'p' + i, at = wraps.length; let task = null;
     const wrap = document.createElement('div'); wrap.className = 'slidewrap'; wrap.style.width = W + 'px';
     wrap.innerHTML = `<span class="num">${i}</span><canvas class="pdfc" style="width:${W}px;height:${H}px"></canvas><canvas class="ink"></canvas><div class="stk-layer"></div>`;
-    deckEl.append(wrap); wraps.push(wrap); wrap._ratio = vp.height / vp.width;
+    deckEl.append(wrap); wraps.push(wrap); wrap._ratio = vp.height / vp.width; wrap._key = key;
     const pc = wrap.querySelector('.pdfc');
     wrap._render = () => { task?.cancel(); const v = page.getViewport({ scale: W / vp.width * Math.min(dpr, 2200 / W) }); pc.width = v.width; pc.height = v.height; ink.fit(); task = page.render({ canvasContext: pc.getContext('2d'), viewport: v }); task.promise.catch(() => {}); }; // cancelled when the document closes
     wrap._show = on => { wrap._live = on; if (on) return wrap._render(); task?.cancel(); pc.width = pc.height = 0; ink.free(); };
-    const pick = () => select(i - 1); wrap.addEventListener('pointerdown', pick); wrap.addEventListener('focusin', pick);
+    const pick = () => select(at); wrap.addEventListener('pointerdown', pick); wrap.addEventListener('focusin', pick);
     const ink = attachInk(g, { host: wrap, canvas: wrap.querySelector('canvas.ink'), list: () => sel.ink[key] ||= [], unit: () => k, save, size: () => [W, W * wrap._ratio], lazy: true });
     wrap._stickies = () => renderStickies(wrap.querySelector('.stk-layer'), sel.stickies[key] ||= [], k, save);
     wrap._stickies(); lazy.observe(wrap);
-    if (i - 1 === resume) { if (sel.pdfPos) deckEl.scrollTop = wrap.offsetTop + (sel.pdfPos.y || 0) * wrap.offsetHeight; restored = true; }
+    if (at === resume) { if (sel.pdfPos) deckEl.scrollTop = wrap.offsetTop + (sel.pdfPos.y || 0) * wrap.offsetHeight; restored = true; }
     if (i === 1) $('#pinfo').textContent = `${pdf.numPages} page${pdf.numPages > 1 ? 's' : ''}`;
   }
-  select(resume);
-  $('#pstk').onclick = () => { const w = wraps[act]; addSticky(sel.stickies['p' + (act + 1)] ||= []); w._stickies(); w.querySelector('.sticky:last-child textarea')?.focus(); };
+  if (!wraps.length) { $('#pinfo').textContent = 'No readable pages'; return; }
+  restored = true; select(Math.min(resume, wraps.length - 1));
+  $('#pstk').onclick = () => { const w = wraps[act]; addSticky(sel.stickies[w._key] ||= []); w._stickies(); w.querySelector('.sticky:last-child textarea')?.focus(); };
 }
 
 /* ---------- whiteboards ---------- */
@@ -2323,7 +2333,7 @@ function viewBoard(id) {
       <div class="seg" id="wbBg" title="Background">${[['dots', 'bgdots', 'Dots'], ['grid', 'bggrid', 'Grid'], ['lines', 'bglines', 'Lines'], ['blank', 'bgblank', 'Blank']].map(([v, ic, t]) => `<button data-bg="${v}" title="${t} background">${icon(ic, 16)}</button>`).join('')}</div>
       <button id="wbTheme" class="ibtn" title="Switch canvas colour"></button>
       <div class="seg"><button id="wbUndo" title="Undo (Ctrl+Z)">${icon('undo', 16)}</button><button id="wbRedo" title="Redo (Ctrl+Y)">${icon('redo', 16)}</button></div>
-      <button id="wbPng" class="ibtn" title="Export the whole board as a PNG image">${icon('download', 16)} ${lbl('Export')}</button><button id="wbDel" class="ibtn sq danger" title="Delete whiteboard">${icon('trash', 16)}</button></div>
+      <button id="wbPng" class="ibtn" title="Export the whole board as a PNG image">${icon('download', 16)} ${lbl('Export')}</button><button id="wbDel" class="ibtn sq danger" title="Move whiteboard to trash">${icon('trash', 16)}</button></div>
     <div class="wb-stage" id="stage"><canvas id="wbc"></canvas><div class="wb-objs" id="wbo"></div><canvas id="wbl"></canvas>
       <div class="wb-selbox" id="wbsel" hidden><div class="wb-selbar"></div><span class="wb-h" title="Drag to resize"></span></div>
       <div class="wb-tools">
@@ -2608,7 +2618,7 @@ function viewBoard(id) {
   $('#bn').oninput = e => { b.name = e.target.value; changed(); };
   $('#wbDel').onclick = () => { if (confirm(`Move whiteboard "${b.name}" to the trash?`)) { trashBoard(b); location.hash = '#/boards'; } };
   $('#wbPng').onclick = async () => {
-    const bb = boundsOf(b.items, box); if (!bb) return toast('Nothing on this board yet');
+    const bb = boundsOf(b.items, box); if (!bb) return toast('Nothing on this whiteboard yet');
     const pad = 40, s = Math.min(2, 8000 / (Math.max(bb.w, bb.h) + pad * 2)), c = document.createElement('canvas');
     c.width = Math.ceil((bb.w + pad * 2) * s); c.height = Math.ceil((bb.h + pad * 2) * s);
     const x = c.getContext('2d'); x.fillStyle = (b.dark ? WB_BG.dark : WB_BG.light).bg; x.fillRect(0, 0, c.width, c.height);
@@ -2743,11 +2753,11 @@ function viewSettings(section) {
     <section class="box" data-ch="calc" id="mathSet"><h3>Math answers</h3>
       <label class="row" style="margin-bottom:8px"><input type="checkbox" data-k="mathEq"${S.settings.mathEq === false ? '' : ' checked'}> <span><b>In equations</b> <span class="mut">— end an equation (Alt+=) with “=” and its answer appears after it, e.g. \\frac{3}{4}+2^3 = 35/4.</span></span></label>
       <label class="row"><input type="checkbox" data-k="mathText"${S.settings.mathText === false ? '' : ' checked'}> <span><b>In notebook pages</b> <span class="mut">— type “12*4 + 7 =” and the answer appears in grey; Tab, Enter or a tap keeps it. A line like “price = 12” sets a value you can use below. Angles follow the calculator's DEG / RAD setting.</span></span></label></section>
-    <section class="box" data-ch="ai"><h3>AI Assistant (DeepSeek)</h3>${NATIVE ? `<p class="mut" style="margin-top:0">Optional. The key is stored only on this computer and is sent only to api.deepseek.com when you use the assistant.</p>
+    <section class="box" data-ch="ai"><h3>AI assistant (DeepSeek)</h3>${NATIVE ? `<p class="mut" style="margin-top:0">Optional. The key is stored only on this device and is sent only to api.deepseek.com when you use the assistant.</p>
       <div class="row"><input id="key" type="password" placeholder="sk-…" style="flex:1" value="${esc(S.settings.aiKey)}"><select id="model">${['deepseek-chat', 'deepseek-reasoner'].map(m => `<option${m === S.settings.aiModel ? ' selected' : ''}>${m}</option>`).join('')}</select><button class="pri" id="saveKey">Save</button></div>` : DESKTOP_ONLY('The AI assistant')}</section>
     ${CAP ? `<section class="box" data-ch="general"><div class="srow" style="border:none;padding:0"><span><b>Reminders</b><small>Tasks at 9:00 on their due day, calendar events 15 minutes before they start.</small></span><label class="switch"><input type="checkbox" id="remOn"${S.settings.reminders === false ? '' : ' checked'}><i></i></label></div></section>` : ''}${syncSettingsHTML()}${ttsSettingsHTML()}<section class="box" data-ch="general"><h3>About</h3><p class="mut" style="margin-top:0"><span id="ver">LocalNotes</span> · Found a bug? <b>Report a problem</b> copies technical details (version, Windows, screen size, how many pages and files you have, recent errors — never your notes, keys or calendar links). Paste them into your message.</p>
       <div class="row"><button id="report">${icon('alert', 16)} Report a problem</button></div></section>
-    <section class="box" data-ch="general"><h3>Backup</h3><p class="mut" style="margin-top:0">All data lives inside the app on this computer. Export a backup now and then (Markdown files are included; PDFs stay inside the app — export them from Files).</p>
+    <section class="box" data-ch="general"><h3>Backup</h3><p class="mut" style="margin-top:0">All data lives inside the app on this device. Export a backup now and then (Markdown files are included; PDFs stay inside the app — export them from Files).</p>
       <div class="row"><button id="exp">Export backup (.json)</button><label class="btn">Import backup…<input type="file" id="imp" accept=".json" hidden></label></div></section></div></div></div>`;
   const ch = SET_CH.some(c => c[0] === section) ? section : section === 'widgets' ? 'home' : S.settings.setCh || 'general'; S.settings.setCh = ch;
   main.querySelectorAll('[data-ch]').forEach(x => x.tagName === 'A' ? x.classList.toggle('on', x.dataset.ch === ch) : x.hidden = x.dataset.ch !== ch);
@@ -2784,9 +2794,9 @@ function viewSettings(section) {
   $('#exp').onclick = async () => dl(new Blob([JSON.stringify(await sealState())], { type: 'application/json' }), `localnotes-backup-${today()}.json`); // protected sections stay encrypted in backups
   $('#imp').onchange = async e => {
     try {
-      const data = JSON.parse(await e.target.files[0].text());
-      if (!Array.isArray(data.notes) || !Array.isArray(data.notebooks)) throw new Error('Not a LocalNotes backup');
-      if (!confirm('Replace ALL current data with this backup?')) return;
+      let data; try { data = JSON.parse(await e.target.files[0].text()); } catch { throw new Error("that file isn't a LocalNotes backup. Choose a .json file made with Export backup"); }
+      if (!Array.isArray(data.notes) || !Array.isArray(data.notebooks)) throw new Error("that file isn't a LocalNotes backup. Choose a .json file made with Export backup");
+      if (!confirm("Replace everything in LocalNotes with this backup?\nYour current pages, tasks and settings will be lost, and this can't be undone. Export a backup first if you're unsure.")) return;
       cleanBackup(data);
       const keepBlobs = S.files.filter(f => f.type !== 'md'); // PDFs and slides aren't in backups, they stay in the app
       forgetSyncBase(); secKeys.clear(); // the keys belong to the old pages: kept, the next save would re-encrypt the sealed imported ones as blanks
@@ -2797,6 +2807,7 @@ function viewSettings(section) {
       S.files = [...(data.files || []), ...keepBlobs.filter(p => !(data.files || []).some(f => f.id === p.id))];
       applyTheme(); flush(); route();
     } catch (err) { alert('Import failed: ' + err.message); }
+    finally { e.target.value = ''; } // so picking the same file again still fires
   };
 }
 
@@ -2818,11 +2829,15 @@ const toggleKbd = open => { const k = $('#kbd'); k.hidden = open === undefined ?
 $('#kbdTab').onclick = () => toggleKbd(); $('#kbdClose').onclick = () => toggleKbd(false);
 addEventListener('pointerdown', e => { if (!$('#kbd').hidden && !e.target.closest('#kbd,#kbdTab')) toggleKbd(false); }); // a click / tap outside closes it
 $('#kbdQ').oninput = e => $('#kbdBody').innerHTML = kbdHTML(e.target.value.toLowerCase());
-function toast(msg, undo) {
-  document.querySelector('.toast:not(.upd)')?.remove(); const t = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg });
+function toast(msg, undo, sticky) { // sticky: an error that has to be read, so it stays until dismissed
+  document.querySelector(sticky ? '.toast.keep' : '.toast:not(.upd):not(.keep)')?.remove(); const t = Object.assign(document.createElement('div'), { className: sticky ? 'toast keep' : 'toast', textContent: msg });
+  t.setAttribute('role', sticky ? 'alert' : 'status'); // read out by screen readers
   if (undo) t.append(Object.assign(document.createElement('button'), { textContent: 'Undo', onclick() { t.remove(); undo(); } }));
-  document.body.append(t); setTimeout(() => t.remove(), undo ? 5000 : 1800);
+  if (sticky) t.append(Object.assign(document.createElement('button'), { textContent: 'Dismiss', onclick() { t.remove(); } }));
+  document.body.append(t); if (!sticky) setTimeout(() => t.remove(), undo ? 5000 : Math.min(6000, Math.max(2200, 1000 + String(msg).length * 55))); // longer messages stay longer
 }
+// Enter or Space opens a focused list row (sections, pages, notes, files), like a click
+document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('div[role=button]')) { e.preventDefault(); e.target.click(); } });
 const focusSearch = () => openSearch();
 document.addEventListener('keydown', e => {
   if (e.defaultPrevented) return;
@@ -2847,7 +2862,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'KeyJ') return go(() => $('#aiBtn').click());
   if (e.key === '\\') return go(toggleSide);
   if (e.key === ',') return go(() => location.hash = '#/settings');
-  if (e.shiftKey && e.code === 'KeyD') return go(() => { inkState.mode = { type: 'pen', pen: 'draw', draw: 'type' }[inkState.mode]; refreshInkUI(); toast({ type: '⌨ Type only', pen: '✒ Stylus draws', draw: '✒ Draw with any input' }[inkState.mode]); });
+  if (e.shiftKey && e.code === 'KeyD') return go(() => { inkState.mode = { type: 'pen', pen: 'draw', draw: 'type' }[inkState.mode]; refreshInkUI(); toast({ type: '⌨ Type only', pen: '✒ Stylus draws', draw: '✒ Draw (any input)' }[inkState.mode]); });
   if (e.shiftKey && e.code === 'KeyS') return go(() => { toggleShapes(); refreshInkUI(); toast(`Ink to shape ${inkState.shapes ? 'on' : 'off'}`); });
   if (e.shiftKey && e.code === 'KeyE') return go(() => { inkState.tool = pen.tool = inkState.tool === 'eraser' ? 'pen' : 'eraser'; refreshInkUI(); toast(inkState.tool === 'eraser' ? 'Eraser' : 'Pen'); });
   if (e.code === 'KeyS') return go(() => toast('Everything saves automatically ✓'));
@@ -3510,6 +3525,6 @@ if (window.native?.onUpdate) window.native.onUpdate(u => {
   t.onclick = async e => { if (e.target.classList.contains('pri')) { await window.flushNow(); window.native.installUpdate(); } else if (e.target.tagName === 'BUTTON') t.remove(); };
   document.body.append(t);
 });
-load().then(() => { route(); if (IS_WIDGET) bc?.postMessage({ type: 'hello' }); else { syncCals(); startSync(); capStart(); } }).catch(err => { main.innerHTML = `<div class="page"><h1>Could not open storage</h1><p>${esc(err.message)}</p></div>`; });
+load().then(() => { route(); if (IS_WIDGET) bc?.postMessage({ type: 'hello' }); else { syncCals(); startSync(); capStart(); } }).catch(err => { main.innerHTML = `<div class="page"><h1>LocalNotes can't open its storage</h1><p>Close other LocalNotes windows or tabs, leave private browsing if it is on, then reload.</p><p class="mut">${esc(err.message)}</p></div>`; });
 // katex.min.js is deferred, so it always loads after this file
 document.getElementById('katexJs').addEventListener('load', renderAllMath);

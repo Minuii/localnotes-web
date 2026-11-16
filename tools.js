@@ -32,7 +32,7 @@ async function restoreTrash(t) {
   for (const n of t.notes || []) {
     let s = secOf(n.sectionId); if (!s) { s = defaultSection(); n.sectionId = s.id; }
     n.notebookId = s.notebookId;
-    const key = n.enc && secKeys.get(s.id); if (key) { Object.assign(n, await decJSON(key, n.enc)); delete n.enc; }
+    const key = n.enc && secKeys.get(s.id); if (key) { try { Object.assign(n, await decJSON(key, n.enc)); delete n.enc; } catch (e) { console.warn('could not open a restored page', e); } } // a damaged page stays encrypted; the restore still finishes
     S.notes.push(n);
   }
   if (t.file) S.files.push(t.file);
@@ -54,7 +54,7 @@ function viewTrash() {
     if (b.dataset.a === 'restore') return restoreTrash(t);
     if (confirm(`Delete "${t.name}" forever? This can't be undone.`)) { purgeTrash(t); save(); route(); }
   };
-  if ($('#tEmpty')) $('#tEmpty').onclick = () => { if (confirm(`Delete all ${S.trash.length} items forever? This can't be undone.`)) { [...S.trash].forEach(purgeTrash); save(); route(); } };
+  if ($('#tEmpty')) $('#tEmpty').onclick = () => { if (confirm(`Delete ${S.trash.length === 1 ? 'the 1 item' : `all ${S.trash.length} items`} in the trash forever? This can't be undone.`)) { [...S.trash].forEach(purgeTrash); save(); route(); } };
 }
 
 /* ---------- global search (Ctrl+F) and quick switcher (Ctrl+P) ---------- */
@@ -71,13 +71,16 @@ function searchItems() {
     ...S.boards.map(b => ({ type: 'board', ic: 'pen', title: b.name, sub: 'Whiteboard', text: (b.items || []).map(i => i.text || '').join(' '), at: b.updated, tags: [], href: `#/board/${b.id}` }))];
 }
 function snippet(text, words) {
-  if (!text) return ''; const lo = text.toLowerCase(), at = words.length ? Math.max(0, lo.indexOf(words[0])) : 0, from = Math.max(0, at - 50);
-  let h = esc(text.slice(from, from + 170)); for (const w of words) h = h.replace(new RegExp(esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`);
-  return (from ? '…' : '') + h;
+  if (!text) return ''; const lo = text.toLowerCase(), at = words.length ? Math.max(0, lo.indexOf(words[0])) : 0, from = Math.max(0, at - 50), cut = text.slice(from, from + 170);
+  // mark the raw text, then escape each piece: marking escaped text let "amp" or "lt" match inside &amp; and &lt;
+  const re = words.length && new RegExp([...words].sort((a, b) => b.length - a.length).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  let h = '', i = 0; if (re) for (const m of cut.matchAll(re)) { h += `${esc(cut.slice(i, m.index))}<mark>${esc(m[0])}</mark>`; i = m.index + m[0].length; }
+  return (from ? '…' : '') + h + esc(cut.slice(i));
 }
 function openSearch() {
   if ($('#gs')) return $('#gsq').select();
-  const all = searchItems(), F = { type: 'all', tag: '', date: 'any' }, tags = [...new Set(all.flatMap(i => i.tags))].sort();
+  // lt and hay: lower-cased once here, not on every key press
+  const all = searchItems().map(i => ({ ...i, lt: i.title.toLowerCase(), hay: `${i.title} ${i.sub} ${i.text} ${i.tags.join(' ')}`.toLowerCase() })), F = { type: 'all', tag: '', date: 'any' }, tags = [...new Set(all.flatMap(i => i.tags))].sort();
   const el = Object.assign(document.createElement('div'), { id: 'gs' });
   el.innerHTML = `<div class="gsbox"><input id="gsq" placeholder="Search everything, or type to jump to a page…" autocomplete="off" spellcheck="false">
     <div class="gsf"><div class="seg" id="gst">${GS_TYPES.map(([k, t]) => `<button data-t="${k}"${k === 'all' ? ' class="on"' : ''}>${t}</button>`).join('')}</div><span style="flex:1"></span>
@@ -93,8 +96,8 @@ function openSearch() {
   };
   const run = () => {
     const words = q.value.toLowerCase().split(/\s+/).filter(Boolean), days = GS_DATES.find(d => d[0] === F.date)[2], since = days ? Date.now() - days * 864e5 : 0;
-    hits = all.filter(i => (F.type === 'all' || i.type === F.type) && (!F.tag || i.tags.includes(F.tag)) && (!since || i.at >= since) && words.every(w => (i.title + ' ' + i.sub + ' ' + i.text + ' ' + i.tags.join(' ')).toLowerCase().includes(w)))
-      .map(i => ({ ...i, score: words.filter(w => i.title.toLowerCase().includes(w)).length * 2 + (i.title.toLowerCase().startsWith(words[0] || '\0') ? 1 : 0) }))
+    hits = all.filter(i => (F.type === 'all' || i.type === F.type) && (!F.tag || i.tags.includes(F.tag)) && (!since || i.at >= since) && words.every(w => i.hay.includes(w)))
+      .map(i => ({ ...i, score: words.filter(w => i.lt.includes(w)).length * 2 + (i.lt.startsWith(words[0] || '\0') ? 1 : 0) }))
       .sort((a, b) => b.score - a.score || b.at - a.at).slice(0, 40);
     sel = 0;
     res.innerHTML = hits.map((h, i) => `<div class="gsi" data-i="${i}">${icon(h.ic, 17)}<span class="gst"><b>${snippet(h.title, words)}</b><small class="mut">${esc(h.sub)}</small>${words.length && h.text ? `<small>${snippet(h.text, words)}</small>` : ''}</span></div>`).join('') || '<p class="mut" style="padding:14px">No matches.</p>';
